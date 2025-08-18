@@ -1,0 +1,28 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+	  <ImplicitUsings>enable</ImplicitUsings>
+	  <Nullable>disable</Nullable>
+	  <LangVersion>latest</LangVersion>
+    <IsPackable>false</IsPackable>
+    <DefineConstants>UNIT_TEST</DefineConstants>
+    <Version>4.0.0</Version>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+    <PackageReference Include="TUnit" Version="0.56.5" />
+    <PackageReference Include="TUnit.Assertions" Version="0.56.5" />
+    <PackageReference Include="coverlet.collector" Version="6.0.4">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\LargeCollections\LargeCollections.csproj" />
+    <ProjectReference Include="..\LargeCollections.DiskCache\LargeCollections.DiskCache.csproj" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,48 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFrameworks>netstandard2.0;netstandard2.1</TargetFrameworks>
+	  <ImplicitUsings>enable</ImplicitUsings>
+	  <Nullable>disable</Nullable>
+	  <LangVersion>latest</LangVersion>
+    <Platforms>AnyCPU</Platforms>
+    <PlatformTarget>AnyCPU</PlatformTarget>
+    <Authors>DevAM</Authors>
+    <Company>DevAM</Company>
+    <Copyright>DevAM</Copyright>
+    <RepositoryType>git</RepositoryType>
+    <PackageTags>LargeCollection;LargeCollections;Large;Collection;Collections;Dictionary;DiskCache;Cache;Disk;Sqlite;Spatial;Query</PackageTags>
+    <NeutralLanguage>en</NeutralLanguage>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <Description>Dictionary-like collections that allow to limit the amount of memory (RAM) in MB that will be used. Any memory requirement that exceeds this amount is automatically swapped out to disk. Additionally it offers multi-threaded operations for performance improvements.</Description>
+    <PackageProjectUrl>https://github.com/DevAM-Tools/LargeCollections</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/DevAM-Tools/LargeCollections</RepositoryUrl>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <Title>LargeCollections.DiskCache</Title>
+    <Product>LargeCollections.DiskCache</Product>
+    <Version>4.0.0</Version>
+    <AssemblyVersion>4.0.0</AssemblyVersion>
+    <FileVersion>4.0.0</FileVersion>
+    <SignAssembly>False</SignAssembly>
+    <GeneratePackageOnBuild>True</GeneratePackageOnBuild>
+    <PackageId>DevAM.LargeCollections.DiskCache</PackageId>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None
+      Include="../README.md"
+      Pack="true"
+      PackagePath="/"
+      CopyToOutputDirectory="PreserveNewest">
+    </None>
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="9.0.8" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\LargeCollections\LargeCollections.csproj" />
+  </ItemGroup>
+
+</Project>
