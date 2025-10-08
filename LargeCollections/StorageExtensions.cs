@@ -27,14 +27,14 @@ using System.Runtime.CompilerServices;
 
 namespace LargeCollections;
 
-internal static class StorageExtensions
+public static class StorageExtensions
 {
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    internal static void CheckRange(long offset, long count, long maxCount)
+    public static void CheckRange(long offset, long count, long maxCount)
     {
-        if (offset < 0L || count < 0L || offset + count > maxCount)
+        if (offset < 0L || count < 0L || offset + count > maxCount || maxCount > Constants.MaxLargeCollectionCount)
         {
-            throw new ArgumentException("offset < 0L || count < 0L || offset + count > maxCount");
+            throw new ArgumentException("offset < 0L || count < 0L || offset + count > maxCount || maxCount > Constants.MaxLargeCollectionCount");
         }
     }
 
@@ -48,7 +48,7 @@ internal static class StorageExtensions
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal static void CheckIndex(long index, long count)
     {
-        if (index < 0L || index >= count)
+        if (index < 0L || index >= count || index > Constants.MaxLargeCollectionCount)
         {
             throw new IndexOutOfRangeException(nameof(index));
         }
@@ -90,10 +90,10 @@ internal static class StorageExtensions
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    internal static (long StorageIndex, long ItemIndex) StorageGetIndex(long index)
+    internal static (int StorageIndex, int ItemIndex) StorageGetIndex(long index)
     {
-        long storageIndex = index >> Constants.StorageIndexShiftAmount;
-        long itemIndex = index & (Constants.MaxStorageCapacity - 1L);
+        int storageIndex = (int)((index >> Constants.StorageIndexShiftAmount) & (Constants.MaxStorageCapacity - 1L));
+        int itemIndex = (int)(index & (Constants.MaxStorageCapacity - 1L));
 
         return (storageIndex, itemIndex);
     }
@@ -119,16 +119,16 @@ internal static class StorageExtensions
             throw new ArgumentOutOfRangeException(nameof(capacity));
         }
 
-        (long storageCount, long remainder) = StorageGetIndex(capacity);
+        (int storageCount, int remainder) = StorageGetIndex(capacity);
         storageCount++;
 
         T[][] result = new T[storageCount][];
 
-        for (long i = 0L; i < storageCount - 1L; i++)
+        for (int i = 0; i < storageCount - 1; i++)
         {
             result[i] = new T[Constants.MaxStorageCapacity];
         }
-        result[storageCount - 1L] = new T[remainder];
+        result[storageCount - 1] = new T[remainder];
 
         return result;
     }
@@ -136,7 +136,7 @@ internal static class StorageExtensions
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal static ref T StorageGetRef<T>(this T[][] array, long index)
     {
-        (long storageIndex, long itemIndex) = StorageGetIndex(index);
+        (int storageIndex, int itemIndex) = StorageGetIndex(index);
 
         return ref array[storageIndex][itemIndex];
     }
@@ -144,7 +144,7 @@ internal static class StorageExtensions
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal static T StorageGet<T>(this T[][] array, long index)
     {
-        (long storageIndex, long itemIndex) = StorageGetIndex(index);
+        (int storageIndex, int itemIndex) = StorageGetIndex(index);
 
         T result = array[storageIndex][itemIndex];
         return result;
@@ -153,7 +153,7 @@ internal static class StorageExtensions
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal static T StorageSet<T>(this T[][] array, long index, in T value)
     {
-        (long storageIndex, long itemIndex) = StorageGetIndex(index);
+        (int storageIndex, int itemIndex) = StorageGetIndex(index);
 
         array[storageIndex][itemIndex] = value;
         return value;
@@ -167,12 +167,12 @@ internal static class StorageExtensions
             yield break;
         }
 
-        (long storageIndex, long itemIndex) = StorageGetIndex(offset);
+        (int storageIndex, int itemIndex) = StorageGetIndex(offset);
 
         long currentCount = 0L;
 
         T[] currentStorage = array[storageIndex];
-        for (long j = itemIndex; j < currentStorage.LongLength; j++)
+        for (int j = itemIndex; j < currentStorage.Length; j++)
         {
             if (currentCount >= count)
             {
@@ -183,14 +183,14 @@ internal static class StorageExtensions
             currentCount++;
         }
 
-        for (long i = storageIndex + 1L; i < array.LongLength; i++)
+        for (int i = storageIndex + 1; i < array.Length; i++)
         {
             if (currentCount >= count)
             {
                 yield break;
             }
             currentStorage = array[i];
-            for (long j = 0L; j < currentStorage.LongLength; j++)
+            for (int j = 0; j < currentStorage.Length; j++)
             {
                 if (currentCount >= count)
                 {
@@ -218,12 +218,12 @@ internal static class StorageExtensions
             return;
         }
 
-        (long storageIndex, long itemIndex) = StorageGetIndex(offset);
+        (int storageIndex, int itemIndex) = StorageGetIndex(offset);
 
         long currentCount = 0L;
 
         T[] currentStorage = array[storageIndex];
-        for (long j = itemIndex; j < currentStorage.LongLength; j++)
+        for (int j = itemIndex; j < currentStorage.Length; j++)
         {
             if (currentCount >= count)
             {
@@ -234,14 +234,14 @@ internal static class StorageExtensions
             currentCount++;
         }
 
-        for (long i = storageIndex + 1L; i < array.LongLength; i++)
+        for (int i = storageIndex + 1; i < array.Length; i++)
         {
             if (currentCount >= count)
             {
                 return;
             }
             currentStorage = array[i];
-            for (long j = 0L; j < currentStorage.LongLength; j++)
+            for (int j = 0; j < currentStorage.Length; j++)
             {
                 if (currentCount >= count)
                 {
@@ -272,12 +272,12 @@ internal static class StorageExtensions
             return false;
         }
 
-        (long storageIndex, long itemIndex) = StorageGetIndex(offset);
+        (int storageIndex, int itemIndex) = StorageGetIndex(offset);
 
         long currentCount = 0L;
 
         T[] currentStorage = array[storageIndex];
-        for (long j = itemIndex; j < currentStorage.LongLength; j++)
+        for (int j = itemIndex; j < currentStorage.Length; j++)
         {
             if (currentCount >= count)
             {
@@ -291,14 +291,14 @@ internal static class StorageExtensions
             currentCount++;
         }
 
-        for (long i = storageIndex + 1L; i < array.LongLength; i++)
+        for (int i = storageIndex + 1; i < array.Length; i++)
         {
             if (currentCount >= count)
             {
                 return false;
             }
             currentStorage = array[i];
-            for (long j = 0L; j < currentStorage.LongLength; j++)
+            for (int j = 0; j < currentStorage.Length; j++)
             {
                 if (currentCount >= count)
                 {
@@ -430,13 +430,13 @@ internal static class StorageExtensions
 
         while (currentCount < count)
         {
-            (long currentSourceStorageIndex, long currentSourceItemIndex) = StorageGetIndex(sourceOffset + currentCount);
+            (int currentSourceStorageIndex, int currentSourceItemIndex) = StorageGetIndex(sourceOffset + currentCount);
             T[] currentSourceArray = source[currentSourceStorageIndex];
 
-            (long currentTargetStorageIndex, long currentTargetItemIndex) = StorageGetIndex(targetOffset + currentCount);
+            (int currentTargetStorageIndex, int currentTargetItemIndex) = StorageGetIndex(targetOffset + currentCount);
             T[] currentTargetArray = target[currentTargetStorageIndex];
 
-            long elementsToCopyCount = Math.Min(currentSourceArray.LongLength - currentSourceItemIndex, currentTargetArray.LongLength - currentTargetItemIndex);
+            long elementsToCopyCount = Math.Min(currentSourceArray.Length - currentSourceItemIndex, currentTargetArray.Length - currentTargetItemIndex);
             elementsToCopyCount = Math.Min(elementsToCopyCount, count - currentCount);
 
             if (elementsToCopyCount <= 0)
@@ -458,10 +458,10 @@ internal static class StorageExtensions
 
         while (currentCount < count)
         {
-            (long currentSourceStorageIndex, long currentSourceItemIndex) = StorageGetIndex(sourceOffset + currentCount);
+            (int currentSourceStorageIndex, int currentSourceItemIndex) = StorageGetIndex(sourceOffset + currentCount);
             T[] currentSourceArray = source[currentSourceStorageIndex];
 
-            long elementsToCopyCount = Math.Min(currentSourceArray.LongLength - currentSourceItemIndex, target.Length - currentTargetItemIndex);
+            long elementsToCopyCount = Math.Min(currentSourceArray.Length - currentSourceItemIndex, target.Length - currentTargetItemIndex);
             elementsToCopyCount = Math.Min(elementsToCopyCount, count - currentCount);
 
             if (elementsToCopyCount <= 0)
@@ -485,10 +485,10 @@ internal static class StorageExtensions
 
         while (currentCount < count)
         {
-            (long currentSourceStorageIndex, long currentSourceItemIndex) = StorageGetIndex(sourceOffset + currentCount);
+            (int currentSourceStorageIndex, int currentSourceItemIndex) = StorageGetIndex(sourceOffset + currentCount);
             T[] currentSourceArray = source[currentSourceStorageIndex];
 
-            long elementsToCopyCount = Math.Min(currentSourceArray.LongLength - currentSourceItemIndex, target.Length - currentTargetItemIndex);
+            long elementsToCopyCount = Math.Min(currentSourceArray.Length - currentSourceItemIndex, target.Length - currentTargetItemIndex);
             elementsToCopyCount = Math.Min(elementsToCopyCount, count - currentCount);
 
             if (elementsToCopyCount <= 0)
@@ -496,7 +496,7 @@ internal static class StorageExtensions
                 throw new ArgumentException("No elements to copy. Check source and target arrays and their offsets/counts.");
             }
 
-            ReadOnlySpan<T> sourceSpan = currentSourceArray.AsSpan((int)currentSourceItemIndex, (int)elementsToCopyCount);
+            ReadOnlySpan<T> sourceSpan = currentSourceArray.AsSpan(currentSourceItemIndex, (int)elementsToCopyCount);
             Span<T> targetSpan = target.Slice((int)currentTargetItemIndex, (int)elementsToCopyCount);
             sourceSpan.CopyTo(targetSpan);
 
@@ -520,10 +520,10 @@ internal static class StorageExtensions
 
         while (currentCount < count)
         {
-            (long currentTargetStorageIndex, long currentTargetItemIndex) = StorageGetIndex(targetOffset + currentCount);
+            (int currentTargetStorageIndex, int currentTargetItemIndex) = StorageGetIndex(targetOffset + currentCount);
             T[] currentTargetArray = target[currentTargetStorageIndex];
 
-            long elementsToCopyCount = Math.Min(currentTargetArray.LongLength - currentTargetItemIndex, source.Length - currentSourceItemIndex);
+            long elementsToCopyCount = Math.Min(currentTargetArray.Length - currentTargetItemIndex, source.Length - currentSourceItemIndex);
             elementsToCopyCount = Math.Min(elementsToCopyCount, count - currentCount);
 
             if (elementsToCopyCount <= 0)
@@ -547,10 +547,10 @@ internal static class StorageExtensions
 
         while (currentCount < count)
         {
-            (long currentTargetStorageIndex, long currentTargetItemIndex) = StorageGetIndex(targetOffset + currentCount);
+            (int currentTargetStorageIndex, int currentTargetItemIndex) = StorageGetIndex(targetOffset + currentCount);
             T[] currentTargetArray = target[currentTargetStorageIndex];
 
-            long elementsToCopyCount = Math.Min(currentTargetArray.LongLength - currentTargetItemIndex, source.Length - currentSourceItemIndex);
+            long elementsToCopyCount = Math.Min(currentTargetArray.Length - currentTargetItemIndex, source.Length - currentSourceItemIndex);
             elementsToCopyCount = Math.Min(elementsToCopyCount, count - currentCount);
 
             if (elementsToCopyCount <= 0)
@@ -575,10 +575,10 @@ internal static class StorageExtensions
 
         while (currentCount < count)
         {
-            (long currentSourceStorageIndex, long currentSourceItemIndex) = StorageGetIndex(offset + currentCount);
+            (int currentSourceStorageIndex, int currentSourceItemIndex) = StorageGetIndex(offset + currentCount);
             byte[] currentSourceArray = source[currentSourceStorageIndex];
 
-            long bytesToWriteCount = Math.Min(currentSourceArray.LongLength - currentSourceItemIndex, count - currentCount);
+            long bytesToWriteCount = Math.Min(currentSourceArray.Length - currentSourceItemIndex, count - currentCount);
 
             stream.Write(currentSourceArray, (int)currentSourceItemIndex, (int)bytesToWriteCount);
 
@@ -592,10 +592,10 @@ internal static class StorageExtensions
 
         while (currentCount < count)
         {
-            (long currentTargetStorageIndex, long currentTargetItemIndex) = StorageGetIndex(offset + currentCount);
+            (int currentTargetStorageIndex, int currentTargetItemIndex) = StorageGetIndex(offset + currentCount);
             byte[] currentTargetArray = target[currentTargetStorageIndex];
 
-            long bytesToReadCount = Math.Min(currentTargetArray.LongLength - currentTargetItemIndex, count - currentCount);
+            long bytesToReadCount = Math.Min(currentTargetArray.Length - currentTargetItemIndex, count - currentCount);
 
             int bytesReadCount = stream.Read(currentTargetArray, (int)currentTargetItemIndex, (int)bytesToReadCount);
 
@@ -611,23 +611,36 @@ internal static class StorageExtensions
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    internal static T[][] StorageResize<T>(this T[][] array, long capacity)
+    internal static void StorageResize<T>(this T[][] array, long capacity)
     {
-        (long storageCount, long remainder) = StorageGetIndex(capacity);
-        storageCount++;
-
-        T[][] result = new T[storageCount][];
-
-        for (long i = 0L; i < storageCount - 1L; i++)
+        if (capacity < 0L || capacity > Constants.MaxLargeCollectionCount)
         {
-            result[i] = new T[Constants.MaxStorageCapacity];
+            throw new ArgumentOutOfRangeException(nameof(capacity));
         }
-        result[storageCount - 1L] = new T[remainder];
 
-        long count = StorageGetCount(array);
-        long bytesToCopy = Math.Min(count, capacity);
+        (int newStorageCount, int newRemainder) = StorageGetIndex(capacity);
+        newStorageCount++;
 
-        array.StorageCopyTo(result, 0L, 0L, bytesToCopy);
-        return result;
+        Array.Resize(ref array, newStorageCount);
+
+        for (int i = 0; i < newStorageCount - 1; i++)
+        {
+            if (array[i] == null)
+            {
+                array[i] = new T[Constants.MaxStorageCapacity];
+            }
+        }
+
+        if (newStorageCount > 0)
+        {
+            if (array[newStorageCount - 1] == null)
+            {
+                array[newStorageCount - 1] = new T[newRemainder];
+            }
+            else
+            {
+                Array.Resize(ref array[newStorageCount - 1], newRemainder);
+            }
+        }
     }
 }

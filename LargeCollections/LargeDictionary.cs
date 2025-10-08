@@ -103,6 +103,32 @@ public class LargeDictionary<TKey, TValue> : LargeSet<KeyValuePair<TKey, TValue>
         AddRange(items);
     }
 
+#if NETSTANDARD2_1_OR_GREATER
+    public LargeDictionary(ReadOnlySpan<KeyValuePair<TKey, TValue>> items,
+        Func<TKey, TKey, bool> keyEqualsFunction = null,
+        Func<TKey, int> hashCodeFunction = null,
+        long capacity = 1L,
+        double capacityGrowFactor = Constants.DefaultCapacityGrowFactor,
+        long fixedCapacityGrowAmount = Constants.DefaultFixedCapacityGrowAmount,
+        long fixedCapacityGrowLimit = Constants.DefaultFixedCapacityGrowLimit,
+        double minLoadFactor = Constants.DefaultMinLoadFactor,
+        double maxLoadFactor = Constants.DefaultMaxLoadFactor,
+        double minLoadFactorTolerance = Constants.DefaultMinLoadFactorTolerance)
+
+        : this(keyEqualsFunction,
+              hashCodeFunction,
+              capacity,
+              capacityGrowFactor,
+              fixedCapacityGrowAmount,
+              fixedCapacityGrowLimit,
+              minLoadFactor,
+              maxLoadFactor,
+              minLoadFactorTolerance)
+    {
+        AddRange(items);
+    }
+#endif
+
     public IEnumerable<TKey> Keys
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -215,67 +241,55 @@ public class LargeDictionary<TKey, TValue> : LargeSet<KeyValuePair<TKey, TValue>
         }
     }
 
+#if NETSTANDARD2_1_OR_GREATER
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public void Remove(TKey key)
+    public override void AddRange(ReadOnlySpan<KeyValuePair<TKey, TValue>> items)
+    {
+        for (int i = 0; i < items.Length; i++)
+        {
+            KeyValuePair<TKey, TValue> item = items[i];
+            if (item.Key is null)
+            {
+                throw new ArgumentNullException(nameof(item), "Key cannot be null");
+            }
+            base.Add(item);
+        }
+    }
+#endif
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public bool Remove(TKey key)
+        => Remove(key, out _);
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public bool Remove(TKey key, out TValue removedValue)
     {
         if (key is null)
         {
             throw new ArgumentNullException(nameof(key));
         }
 
+        removedValue = default;
+
         KeyValuePair<TKey, TValue> keyItem = new(key, default);
-        if (TryGetValue(keyItem, out KeyValuePair<TKey, TValue> actualItem))
+        if (base.Remove(keyItem, out KeyValuePair<TKey, TValue> removedItem))
         {
-            base.Remove(actualItem);
+            removedValue = removedItem.Value;
+            return true;
         }
+
+        return false;
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public override void Remove(KeyValuePair<TKey, TValue> item)
+    public override bool Remove(KeyValuePair<TKey, TValue> item, out KeyValuePair<TKey, TValue> removedItem)
     {
         if (item.Key is null)
         {
             throw new ArgumentNullException(nameof(item));
         }
 
-        // Only remove if both key and value match exactly
-        if (Contains(item))
-        {
-            base.Remove(item);
-        }
-    }
-
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public void Remove(IEnumerable<TKey> keys)
-    {
-        if (keys is null)
-        {
-            throw new ArgumentNullException(nameof(keys));
-        }
-
-        foreach (TKey key in keys)
-        {
-            if (key is null)
-            {
-                throw new ArgumentNullException(nameof(key));
-            }
-
-            Remove(key);
-        }
-    }
-
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public override void Remove(IEnumerable<KeyValuePair<TKey, TValue>> items)
-    {
-        if (items is null)
-        {
-            throw new ArgumentNullException(nameof(items));
-        }
-
-        foreach (KeyValuePair<TKey, TValue> item in items)
-        {
-            base.Remove(item);
-        }
+        return base.Remove(item, out removedItem);
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]

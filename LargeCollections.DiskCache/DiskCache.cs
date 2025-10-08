@@ -186,6 +186,9 @@ public class DiskCache<TKey, TValue> : IDiskCache<TKey, TValue>, IDisposable whe
     protected SqliteCommand[] _deleteItemCommands;
     protected SqliteParameter[] _deleteItemIdParameters;
 
+    protected SqliteCommand[] _queryIdAndItemCommands;
+    protected SqliteParameter[] _queryIdAndItemIdParameters;
+
     protected SqliteCommand[] _queryItemCommands;
     protected SqliteParameter[] _queryItemIdParameters;
 
@@ -297,6 +300,8 @@ public class DiskCache<TKey, TValue> : IDiskCache<TKey, TValue>, IDisposable whe
         _upsertItemItemParameters = new SqliteParameter[DegreeOfParallelism];
         _deleteItemCommands = new SqliteCommand[DegreeOfParallelism];
         _deleteItemIdParameters = new SqliteParameter[DegreeOfParallelism];
+        _queryIdAndItemCommands = new SqliteCommand[DegreeOfParallelism];
+        _queryIdAndItemIdParameters = new SqliteParameter[DegreeOfParallelism];
         _queryItemCommands = new SqliteCommand[DegreeOfParallelism];
         _queryItemIdParameters = new SqliteParameter[DegreeOfParallelism];
         _countItemsCommands = new SqliteCommand[DegreeOfParallelism];
@@ -360,14 +365,21 @@ public class DiskCache<TKey, TValue> : IDiskCache<TKey, TValue>, IDisposable whe
             _upsertItemCommands[i].Prepare();
 
             _deleteItemCommands[i] = _connections[i].CreateCommand();
-            _deleteItemCommands[i].CommandText = $"DELETE FROM items WHERE id = @id;";
+            _deleteItemCommands[i].CommandText = $"DELETE FROM items WHERE id = @id RETURNING item;";
             _deleteItemIdParameters[i] = new SqliteParameter("@id", _keyType);
             _deleteItemCommands[i].Parameters.Add(_deleteItemIdParameters[i]);
             _deleteItemCommands[i].Transaction = _transactions[i];
             _deleteItemCommands[i].Prepare();
 
+            _queryIdAndItemCommands[i] = _connections[i].CreateCommand();
+            _queryIdAndItemCommands[i].CommandText = $"SELECT id, item FROM items WHERE id = @id;";
+            _queryIdAndItemIdParameters[i] = new SqliteParameter("@id", _keyType);
+            _queryIdAndItemCommands[i].Parameters.Add(_queryIdAndItemIdParameters[i]);
+            _queryIdAndItemCommands[i].Transaction = _transactions[i];
+            _queryIdAndItemCommands[i].Prepare();
+
             _queryItemCommands[i] = _connections[i].CreateCommand();
-            _queryItemCommands[i].CommandText = $"SELECT id, item FROM items WHERE id = @id;";
+            _queryItemCommands[i].CommandText = $"SELECT item FROM items WHERE id = @id;";
             _queryItemIdParameters[i] = new SqliteParameter("@id", _keyType);
             _queryItemCommands[i].Parameters.Add(_queryItemIdParameters[i]);
             _queryItemCommands[i].Transaction = _transactions[i];
@@ -616,17 +628,17 @@ public class DiskCache<TKey, TValue> : IDiskCache<TKey, TValue>, IDisposable whe
         {
             _queryItemIdParameters[index].Value = keyParameterValue;
 
-            using SqliteDataReader reader = _queryItemCommands[index].ExecuteReader();
+            object item = _queryItemCommands[index].ExecuteScalar();
 
-            if (reader.Read())
+            if (item != null)
             {
                 if (typeof(TValue) == typeof(long) || typeof(TValue) == typeof(string) || typeof(TValue) == typeof(byte[]) || typeof(TValue) == typeof(double))
                 {
-                    value = (TValue)reader.GetValue(1);
+                    value = (TValue)item;
                 }
                 else
                 {
-                    byte[] serializedValue = (byte[])reader.GetValue(1);
+                    byte[] serializedValue = (byte[])item;
 
                     value = _deserializeValueFunction(serializedValue);
                 }
@@ -668,6 +680,23 @@ public class DiskCache<TKey, TValue> : IDiskCache<TKey, TValue>, IDisposable whe
         }
     }
 
+#if NETSTANDARD2_1_OR_GREATER
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public void AddRange(ReadOnlySpan<KeyValuePair<TKey, TValue>> items)
+    {
+        if (IsReadOnly)
+        {
+            throw new InvalidOperationException("Modifications are not allowed when opened in read only mode.");
+        }
+
+        for(int i = 0; i < items.Length; i++)
+        {
+            KeyValuePair<TKey, TValue> item = items[i];
+            Set(item.Key, item.Value);
+        }
+    }
+#endif
+
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void AddParallel(IEnumerable<KeyValuePair<TKey, TValue>>[] parallelItems)
     {
@@ -685,20 +714,52 @@ public class DiskCache<TKey, TValue> : IDiskCache<TKey, TValue>, IDisposable whe
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public void Remove(TKey key)
+    public bool Remove(TKey key)
+        => Remove(key, true, out _);
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public bool Remove(TKey key, out TValue removedValue)
+    => Remove(key, false, out removedValue);
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public bool Remove(KeyValuePair<TKey, TValue> item)
+        => Remove(item.Key, false, out _);
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public bool Remove(KeyValuePair<TKey, TValue> item, out TValue removedValue)
+        => Remove(item.Key, false, out removedValue);
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public bool Remove(KeyValuePair<TKey, TValue> item, out KeyValuePair<TKey, TValue> removedItem)
+    {
+        removedItem = default;
+
+        if (Remove(item.Key, false, out TValue removedValue))
+        {
+            removedItem = new KeyValuePair<TKey, TValue>(item.Key, removedValue);
+            return true;
+        }
+
+        return false;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private bool Remove(TKey key, bool ignoreReturnedValue, out TValue removedValue)
     {
         if (IsReadOnly)
         {
             throw new InvalidOperationException("Modifications are not allowed when opened in read only mode.");
         }
 
-        int index = 0;
-        object keyParameterValue = null;
-
         if (key is null)
         {
             throw new ArgumentNullException(nameof(key));
         }
+
+        removedValue = default;
+
+        int index = 0;
+        object keyParameterValue = null;
 
         if (typeof(TKey) == typeof(long))
         {
@@ -714,7 +775,7 @@ public class DiskCache<TKey, TValue> : IDiskCache<TKey, TValue>, IDisposable whe
             {
                 if (stringKey.Length == 0)
                 {
-                    return;
+                    return false;
                 }
 
                 index = GetParallelIndex(stringKey, DegreeOfParallelism);
@@ -727,7 +788,7 @@ public class DiskCache<TKey, TValue> : IDiskCache<TKey, TValue>, IDisposable whe
             {
                 if (bytesKey.Length == 0)
                 {
-                    return;
+                    return false;
                 }
                 if (bytesKey.Length > DiskCacheConstants.MaxItemLength)
                 {
@@ -742,7 +803,7 @@ public class DiskCache<TKey, TValue> : IDiskCache<TKey, TValue>, IDisposable whe
         {
             if (_serializeKeyFunction is null)
             {
-                return;
+                return false;
             }
 
             byte[] serializedKey = _serializeKeyFunction(key)
@@ -765,51 +826,28 @@ public class DiskCache<TKey, TValue> : IDiskCache<TKey, TValue>, IDisposable whe
         {
             _deleteItemIdParameters[index].Value = keyParameterValue;
 
-            _deleteItemCommands[index].ExecuteNonQuery();
-        }
-    }
+            object removedItem = _deleteItemCommands[index].ExecuteScalar();
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public void Remove(IEnumerable<TKey> keys)
-    {
-        if (keys is null)
-        {
-            throw new ArgumentNullException(nameof(keys));
-        }
+            if (removedItem is null)
+            {
+                return false;
+            }
+            if (ignoreReturnedValue)
+            {
+                return true;
+            }
 
-        foreach (TKey key in keys)
-        {
-            Remove(key);
-        }
-    }
+            if (typeof(TValue) == typeof(long) || typeof(TValue) == typeof(string) || typeof(TValue) == typeof(byte[]) || typeof(TValue) == typeof(double))
+            {
+                removedValue = (TValue)removedItem;
+            }
+            else
+            {
+                byte[] serializedValue = (byte[])removedItem;
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public void Remove(KeyValuePair<TKey, TValue> item)
-    {
-        if (IsReadOnly)
-        {
-            throw new InvalidOperationException("Modifications are not allowed when opened in read only mode.");
-        }
-
-        Remove(item.Key);
-    }
-
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public void Remove(IEnumerable<KeyValuePair<TKey, TValue>> items)
-    {
-        if (items is null)
-        {
-            throw new ArgumentNullException(nameof(items));
-        }
-
-        if (IsReadOnly)
-        {
-            throw new InvalidOperationException("Modifications are not allowed when opened in read only mode.");
-        }
-
-        foreach (KeyValuePair<TKey, TValue> item in items)
-        {
-            Remove(item.Key);
+                removedValue = _deserializeValueFunction(serializedValue);
+            }
+            return true;
         }
     }
 
@@ -826,7 +864,7 @@ public class DiskCache<TKey, TValue> : IDiskCache<TKey, TValue>, IDisposable whe
             throw new InvalidOperationException("Modifications are not allowed when opened in read only mode.");
 
         }
-        parallelKeys.DoParallel(Remove);
+        parallelKeys.DoParallel(key => Remove(key));
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -988,6 +1026,12 @@ public class DiskCache<TKey, TValue> : IDiskCache<TKey, TValue>, IDisposable whe
                     _deleteItemCommands[i] = null;
                 }
 
+                if (_queryIdAndItemCommands is not null && _queryIdAndItemCommands[i] is not null)
+                {
+                    _queryIdAndItemCommands[i].Dispose();
+                    _queryIdAndItemCommands[i] = null;
+                }
+
                 if (_queryItemCommands is not null && _queryItemCommands[i] is not null)
                 {
                     _queryItemCommands[i].Dispose();
@@ -1041,6 +1085,7 @@ public class DiskCache<TKey, TValue> : IDiskCache<TKey, TValue>, IDisposable whe
 
         _upsertItemCommands = null;
         _deleteItemCommands = null;
+        _queryIdAndItemCommands = null;
         _queryItemCommands = null;
         _countItemsCommands = null;
         _clearItemsCommands = null;

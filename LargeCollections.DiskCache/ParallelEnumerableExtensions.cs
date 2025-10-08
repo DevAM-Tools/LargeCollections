@@ -91,7 +91,7 @@ public static class ParallelEnumerableExtensions
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static IEnumerable<Tout>[] DoParallel<Tin, Tout, TParam>(this IEnumerable<Tin>[] parallelItems, TParam[] arguments, Func<Tin, TParam, Tout> function)
+    public static IEnumerable<Tout>[] Select<Tin, Tout, TParam>(this IEnumerable<Tin>[] parallelItems, TParam[] arguments, Func<Tin, TParam, Tout> function)
     {
         if (parallelItems is null)
         {
@@ -126,7 +126,7 @@ public static class ParallelEnumerableExtensions
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static IEnumerable<Tout>[] DoParallel<Tin, Tout>(this IEnumerable<Tin>[] parallelItems, Func<Tin, Tout> function)
+    public static IEnumerable<Tout>[] Select<Tin, Tout>(this IEnumerable<Tin>[] parallelItems, Func<Tin, Tout> function)
     {
         if (parallelItems is null)
         {
@@ -141,8 +141,7 @@ public static class ParallelEnumerableExtensions
 
         for (int i = 0; i < parallelItems.Length; i++)
         {
-            result[i] = parallelItems[i]
-                .Select(function);
+            result[i] = parallelItems[i].Select(function);
         }
 
         return result;
@@ -166,11 +165,23 @@ public static class ParallelEnumerableExtensions
             IEnumerable<T> items = parallelItems[i];
             tasks[i] = Task.Run(() =>
             {
-                foreach (T item in items)
+                if (items is IReadOnlyList<T> list)
                 {
-                    action(item);
+                    int count = list.Count;
+                    for (int j = 0; j < count; j++)
+                    {
+                        T item = list[j];
+                        action(item);
+                    }
+                    return;
                 }
-
+                else
+                {
+                    foreach (T item in items)
+                    {
+                        action(item);
+                    }
+                }
             });
         }
         Task.WaitAll(tasks);
@@ -203,10 +214,24 @@ public static class ParallelEnumerableExtensions
             TParam argument = arguments[i];
             tasks[i] = Task.Run(() =>
             {
-                foreach (Tin item in items)
+                if (items is IReadOnlyList<Tin> list)
                 {
-                    action(item, argument);
+                    int count = list.Count;
+                    for (int j = 0; j < count; j++)
+                    {
+                        Tin item = list[j];
+                        action(item, argument);
+                    }
+                    return;
                 }
+                else
+                {
+                    foreach (Tin item in items)
+                    {
+                        action(item, argument);
+                    }
+                }
+
             });
         }
         Task.WaitAll(tasks);
@@ -301,7 +326,7 @@ public static class ParallelEnumerableExtensions
 
         IEnumerable<Tin>[] parallelItems = items.ToParallel(degreeOfParallelism);
 
-        return parallelItems.DoParallel(arguments, function);
+        return parallelItems.Select(arguments, function);
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -318,7 +343,7 @@ public static class ParallelEnumerableExtensions
 
         IEnumerable<Tin>[] parallelItems = items.ToParallel(degreeOfParallelism);
 
-        return parallelItems.DoParallel(function);
+        return parallelItems.Select(function);
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]

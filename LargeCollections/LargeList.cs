@@ -1,4 +1,4 @@
-﻿/*
+/*
 MIT License
 SPDX-License-Identifier: MIT
 
@@ -34,7 +34,7 @@ namespace LargeCollections;
 /// Lists allow index based access to the elements.
 /// </summary>
 [DebuggerDisplay("LargeList: Count = {Count}")]
-public class LargeList<T> : ILargeList<T>
+public class LargeList<T> : IRefAccessLargeList<T>
 {
     private T[][] _Storage;
     public double CapacityGrowFactor
@@ -61,6 +61,14 @@ public class LargeList<T> : ILargeList<T>
         private set;
     }
 
+    public double MinLoadFactor
+    {
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        get;
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private set;
+    }
+
     public long Count
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -80,7 +88,8 @@ public class LargeList<T> : ILargeList<T>
     public LargeList(long capacity = 1L,
         double capacityGrowFactor = Constants.DefaultCapacityGrowFactor,
         long fixedCapacityGrowAmount = Constants.DefaultFixedCapacityGrowAmount,
-        long fixedCapacityGrowLimit = Constants.DefaultFixedCapacityGrowLimit)
+        long fixedCapacityGrowLimit = Constants.DefaultFixedCapacityGrowLimit,
+        double minLoadFactor = Constants.DefaultMinLoadFactor)
     {
         if (capacityGrowFactor <= 1.0 || capacityGrowFactor > Constants.MaxCapacityGrowFactor)
         {
@@ -94,6 +103,10 @@ public class LargeList<T> : ILargeList<T>
         {
             throw new ArgumentOutOfRangeException(nameof(fixedCapacityGrowLimit));
         }
+        if (minLoadFactor < 0.0 || minLoadFactor >= 1.0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(minLoadFactor));
+        }
 
         _Storage = StorageExtensions.StorageCreate<T>(capacity);
         Count = 0L;
@@ -104,18 +117,35 @@ public class LargeList<T> : ILargeList<T>
         FixedCapacityGrowAmount = fixedCapacityGrowAmount;
 
         FixedCapacityGrowLimit = fixedCapacityGrowLimit;
+
+        MinLoadFactor = minLoadFactor;
     }
 
     public LargeList(IEnumerable<T> items,
         long capacity = 1L,
         double capacityGrowFactor = Constants.DefaultCapacityGrowFactor,
         long fixedCapacityGrowAmount = Constants.DefaultFixedCapacityGrowAmount,
-        long fixedCapacityGrowLimit = Constants.DefaultFixedCapacityGrowLimit)
+        long fixedCapacityGrowLimit = Constants.DefaultFixedCapacityGrowLimit,
+        double minLoadFactor = Constants.DefaultMinLoadFactor)
 
-        : this(capacity, capacityGrowFactor, fixedCapacityGrowAmount, fixedCapacityGrowLimit)
+        : this(capacity, capacityGrowFactor, fixedCapacityGrowAmount, fixedCapacityGrowLimit, minLoadFactor)
     {
         AddRange(items);
     }
+
+#if NETSTANDARD2_1_OR_GREATER
+    public LargeList(ReadOnlySpan<T> items,
+            long capacity = 1L,
+            double capacityGrowFactor = Constants.DefaultCapacityGrowFactor,
+            long fixedCapacityGrowAmount = Constants.DefaultFixedCapacityGrowAmount,
+            long fixedCapacityGrowLimit = Constants.DefaultFixedCapacityGrowLimit,
+            double minLoadFactor = Constants.DefaultMinLoadFactor)
+
+            : this(capacity, capacityGrowFactor, fixedCapacityGrowAmount, fixedCapacityGrowLimit, minLoadFactor)
+    {
+        AddRange(items);
+    }
+#endif
 
     public T this[long index]
     {
@@ -509,41 +539,67 @@ public class LargeList<T> : ILargeList<T>
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public void Remove(T item)
+    public bool Remove(T item)
+        => Remove(item, true, out _);
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public bool Remove(T item, bool preserveOrder)
+        => Remove(item, preserveOrder, out _);
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public bool Remove(T item, out T removedItem)
+        => Remove(item, true, out removedItem);
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public bool Remove(T item, bool preserveOrder, out T removedItem)
     {
+        removedItem = default;
+
         for (long i = 0L; i < Count; i++)
         {
             T currentItem = _Storage.StorageGet(i);
             if (LargeSet<T>.DefaultEqualsFunction(item, currentItem))
             {
-                RemoveAt(i);
-                break;
+                removedItem = currentItem;
+                RemoveAt(i, preserveOrder);
+                return true;
             }
         }
+
+        return false;
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public void Remove(IEnumerable<T> items)
-    {
-        foreach (T item in items)
-        {
-            Remove(item);
-        }
-    }
+    public T RemoveAt(long index)
+        => RemoveAt(index, true);
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public void RemoveAt(long index)
+    public T RemoveAt(long index, bool preserveOrder)
     {
         StorageExtensions.CheckIndex(index, Count);
 
-        for (long i = index; i < Count - 1L; i++)
+        T removedItem = _Storage.StorageGet(index);
+        if (preserveOrder)
         {
-            T item = _Storage.StorageGet(i + 1L);
-            _Storage.StorageSet(i, item);
+            for (long i = index; i < Count - 1L; i++)
+            {
+                ref T item = ref _Storage.StorageGetRef(i + 1L);
+                _Storage.StorageSet(i, item);
+            }
+        }
+        else if (index != Count - 1L)
+        {
+            ref T lastItem = ref _Storage.StorageGetRef(Count - 1L);
+            _Storage.StorageSet(index, lastItem);
         }
 
         _Storage.StorageSet(Count - 1L, default);
         Count--;
+
+        // Check if we need to shrink based on MinLoadFactor
+        ShrinkIfNeeded();
+
+        return removedItem;
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -551,6 +607,22 @@ public class LargeList<T> : ILargeList<T>
     {
         StorageExtensions.CheckIndex(index, Count);
         _Storage.StorageSet(index, item);
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private void ShrinkIfNeeded()
+    {
+        if (MinLoadFactor <= 0.0 || Capacity <= 1L)
+        {
+            return;
+        }
+
+        double currentLoadFactor = (double)Count / (double)Capacity;
+
+        if (currentLoadFactor < MinLoadFactor)
+        {
+            Shrink();
+        }
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -763,7 +835,7 @@ public class LargeList<T> : ILargeList<T>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private void Resize(long capacity)
     {
-        _Storage = _Storage.StorageResize(capacity);
+        _Storage.StorageResize(capacity);
         Capacity = capacity;
     }
 }

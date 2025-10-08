@@ -34,7 +34,7 @@ namespace LargeCollections
     /// Arrays allow index based access to the elements.
     /// </summary>
     [DebuggerDisplay("LargeArray: Count = {Count}")]
-    public class LargeArray<T>(long capacity = 0L) : ILargeArray<T>
+    public class LargeArray<T>(long capacity = 0L) : IRefAccessLargeArray<T>
     {
         private static readonly Comparer<T> _DefaultComparer = Comparer<T>.Default;
 
@@ -67,7 +67,7 @@ namespace LargeCollections
             {
                 return;
             }
-            _Storage = _Storage.StorageResize(capacity);
+            _Storage.StorageResize(capacity);
             Count = capacity;
         }
 

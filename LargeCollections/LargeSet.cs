@@ -201,6 +201,32 @@ public class LargeSet<T> : ILargeCollection<T>
         AddRange(items);
     }
 
+#if NETSTANDARD2_1_OR_GREATER
+    public LargeSet(ReadOnlySpan<T> items,
+        Func<T, T, bool> equalsFunction = null,
+        Func<T, int> hashCodeFunction = null,
+        long capacity = 1L,
+        double capacityGrowFactor = Constants.DefaultCapacityGrowFactor,
+        long fixedCapacityGrowAmount = Constants.DefaultFixedCapacityGrowAmount,
+        long fixedCapacityGrowLimit = Constants.DefaultFixedCapacityGrowLimit,
+        double minLoadFactor = Constants.DefaultMinLoadFactor,
+        double maxLoadFactor = Constants.DefaultMaxLoadFactor,
+        double minLoadFactorTolerance = Constants.DefaultMinLoadFactorTolerance)
+
+        : this(equalsFunction,
+            hashCodeFunction,
+            capacity,
+            capacityGrowFactor,
+            fixedCapacityGrowAmount,
+            fixedCapacityGrowLimit,
+            minLoadFactor,
+            maxLoadFactor,
+            minLoadFactorTolerance)
+    {
+        AddRange(items);
+    }
+#endif
+
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     protected static void AddToStorageInternal(ref T item, LargeArray<SetElement> storage, ref long count, Func<T, T, bool> equalsFunction, Func<T, int> hashCodeFunction)
     {
@@ -279,9 +305,26 @@ public class LargeSet<T> : ILargeCollection<T>
         }
     }
 
+#if NETSTANDARD2_1_OR_GREATER
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public virtual void Remove(T item)
+    public virtual void AddRange(ReadOnlySpan<T> items)
     {
+        for (int i = 0; i < items.Length; i++)
+        {
+            Add(items[i]);
+        }
+    }
+#endif
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public virtual bool Remove(T item)
+        => Remove(item, out _);
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public virtual bool Remove(T item, out T removedItem)
+    {
+        removedItem = default;
+
         long bucketIndex = GetBucketIndexInternal(item, Capacity, HashCodeFunction);
 
         SetElement element = _Storage[bucketIndex];
@@ -291,6 +334,7 @@ public class LargeSet<T> : ILargeCollection<T>
         {
             if (EqualsFunction.Invoke(item, element.Item))
             {
+                removedItem = element.Item;
                 element.Item = default;
 
                 // Is it the first and only element?
@@ -312,21 +356,14 @@ public class LargeSet<T> : ILargeCollection<T>
                 Count--;
 
                 Shrink();
-                return;
+                return true;
             }
 
             previousElement = element;
             element = element.NextElement;
         }
-    }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public virtual void Remove(IEnumerable<T> items)
-    {
-        foreach (T item in items)
-        {
-            Remove(item);
-        }
+        return false;
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]

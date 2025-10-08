@@ -77,10 +77,16 @@ public class SpatialDiskCacheTest : DiskCacheTest
             .Throws<ArgumentNullException>();
 
         // Test inherited null parameter handling
-        await Assert.That(() => spatialCache.AddRange(null))
+        await Assert.That(() => spatialCache.AddRange((IEnumerable<KeyValuePair<long, string>>)null))
             .Throws<ArgumentNullException>();
-        await Assert.That(() => spatialCache.Remove((IEnumerable<long>)null))
-            .Throws<ArgumentNullException>();
+
+        long previousCount = spatialCache.Count;
+        spatialCache.AddRange((ReadOnlySpan<KeyValuePair<long, string>>)null);
+        await Assert.That(spatialCache.Count).IsEqualTo(previousCount);
+
+        // Test Remove with individual key (new API)
+        bool removeResult = spatialCache.Remove(999L); // Non-existing key
+        await Assert.That(removeResult).IsFalse();
         await Assert.That(() => spatialCache.DoForEach((Action<KeyValuePair<long, string>>)null))
             .Throws<ArgumentNullException>();
 

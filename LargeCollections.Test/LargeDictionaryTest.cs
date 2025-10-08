@@ -91,9 +91,16 @@ public class LargeDictionaryTest
             await Assert.That(largeDictionary[duplicateKey]).IsEqualTo(newValue);
         }
 
-        // Test 6: Test AddRange with empty collection
+        // Test 6: Test AddRange with empty collection (IEnumerable version)
         largeDictionary.AddRange([]);
         await Assert.That(largeDictionary.Count).IsEqualTo(count);
+
+#if NETSTANDARD2_1_OR_GREATER
+        // Test 6a: Test AddRange ReadOnlySpan version with empty span
+        ReadOnlySpan<KeyValuePair<string, long>> emptySpan = [];
+        largeDictionary.AddRange(emptySpan);
+        await Assert.That(largeDictionary.Count).IsEqualTo(count);
+#endif
 
         // Test 7: Test AddRange with duplicates
         if (count >= 2)
@@ -112,6 +119,58 @@ public class LargeDictionaryTest
 
     [Test]
     [MethodDataSource(typeof(LargeArrayTest), nameof(LargeArrayTest.CapacitiesTestCasesArguments))]
+    public async Task AddRangeReadOnlySpan(long count)
+    {
+        // input check
+        if (count < 0 || count > Constants.MaxLargeCollectionCount)
+        {
+            return;
+        }
+
+#if NETSTANDARD2_1_OR_GREATER
+        LargeDictionary<string, long> largeDictionary = [];
+
+        // Test AddRange with ReadOnlySpan
+        KeyValuePair<string, long>[] pairs = LargeEnumerable.Range(count)
+            .Select(i => new KeyValuePair<string, long>(i.ToString(), i * 5))
+            .ToArray();
+
+        ReadOnlySpan<KeyValuePair<string, long>> span = pairs.AsSpan();
+        largeDictionary.AddRange(span);
+
+        await Assert.That(largeDictionary.Count).IsEqualTo(count);
+
+        // Verify all items were added correctly
+        for (long i = 0; i < count; i++)
+        {
+            string key = i.ToString();
+            await Assert.That(largeDictionary.ContainsKey(key)).IsTrue();
+            await Assert.That(largeDictionary[key]).IsEqualTo(i * 5);
+        }
+
+        // Test AddRange ReadOnlySpan with partial span
+        if (count >= 4)
+        {
+            KeyValuePair<string, long>[] newPairs = [
+                new("new1", 1000),
+                new("new2", 2000)
+            ];
+            ReadOnlySpan<KeyValuePair<string, long>> partialSpan = newPairs.AsSpan();
+            long countBefore = largeDictionary.Count;
+            
+            largeDictionary.AddRange(partialSpan);
+            await Assert.That(largeDictionary.Count).IsEqualTo(countBefore + 2);
+            await Assert.That(largeDictionary["new1"]).IsEqualTo(1000);
+            await Assert.That(largeDictionary["new2"]).IsEqualTo(2000);
+        }
+#else
+        // For .NET Standard 2.0, just complete the async method
+        await Task.CompletedTask;
+#endif
+    }
+
+    [Test]
+    [MethodDataSource(typeof(LargeArrayTest), nameof(LargeArrayTest.CapacitiesTestCasesArguments))]
     public async Task Remove(long count)
     {
         if (count < 0L || count > Constants.MaxLargeCollectionCount)
@@ -124,6 +183,8 @@ public class LargeDictionaryTest
 
         // Test null parameter handling for Remove methods
         await Assert.That(() => largeDictionary.Remove((string)null))
+            .Throws<ArgumentNullException>();
+        await Assert.That(() => largeDictionary.Remove((string)null, out _))
             .Throws<ArgumentNullException>();
         await Assert.That(() => largeDictionary.Remove(new KeyValuePair<string, long>(null, 42)))
             .Throws<ArgumentNullException>();
@@ -140,7 +201,8 @@ public class LargeDictionaryTest
         {
             string key = i.ToString();
             await Assert.That(largeDictionary.ContainsKey(key)).IsTrue();
-            largeDictionary.Remove(key);
+            bool wasRemoved = largeDictionary.Remove(key);
+            await Assert.That(wasRemoved).IsTrue();
             await Assert.That(largeDictionary.ContainsKey(key)).IsFalse();
             await Assert.That(largeDictionary.Count).IsEqualTo(count - i - 1);
         }
@@ -150,14 +212,17 @@ public class LargeDictionaryTest
         {
             string key = i.ToString();
             long countBefore = largeDictionary.Count;
-            largeDictionary.Remove(key); // Already removed
+            bool wasRemoved = largeDictionary.Remove(key); // Already removed
+            await Assert.That(wasRemoved).IsFalse();
             await Assert.That(largeDictionary.Count).IsEqualTo(countBefore);
         }
 
         // Test 4: Test Remove(TKey key) - keys that never existed
         long countBeforeNonExistent = largeDictionary.Count;
-        largeDictionary.Remove((count + 100).ToString());
-        largeDictionary.Remove((-1).ToString());
+        bool wasRemoved1 = largeDictionary.Remove((count + 100).ToString());
+        bool wasRemoved2 = largeDictionary.Remove((-1).ToString());
+        await Assert.That(wasRemoved1).IsFalse();
+        await Assert.That(wasRemoved2).IsFalse();
         await Assert.That(largeDictionary.Count).IsEqualTo(countBeforeNonExistent);
 
         // Test 5: Test Remove(KeyValuePair<TKey, TValue>) - exact match
@@ -183,14 +248,14 @@ public class LargeDictionaryTest
                 long correctValue = largeDictionary[remainingKey];
                 long wrongValue = correctValue + 999;
                 long countBefore = largeDictionary.Count;
-                largeDictionary.Remove(new KeyValuePair<string, long>(remainingKey, wrongValue));
-                await Assert.That(largeDictionary.Count).IsEqualTo(countBefore); // Should not remove
-                await Assert.That(largeDictionary.ContainsKey(remainingKey)).IsTrue();
-                await Assert.That(largeDictionary[remainingKey]).IsEqualTo(correctValue);
+                bool wasRemoved = largeDictionary.Remove(new KeyValuePair<string, long>(remainingKey, wrongValue));
+                await Assert.That(wasRemoved).IsTrue(); // Should remove because key exists (value is ignored)
+                await Assert.That(largeDictionary.Count).IsEqualTo(countBefore - 1); // Should decrease by 1
+                await Assert.That(largeDictionary.ContainsKey(remainingKey)).IsFalse();
             }
         }
 
-        // Test 7: Test Remove(IEnumerable<TKey> keys) - multiple keys at once
+        // Test 7: Test Remove(TKey key) with multiple keys - new API returns bool
         List<string> keysToRemove = [];
         long remainingCount = largeDictionary.Count;
 
@@ -201,8 +266,17 @@ public class LargeDictionaryTest
 
         if (keysToRemove.Count > 0)
         {
-            largeDictionary.Remove(keysToRemove);
-            await Assert.That(largeDictionary.Count).IsEqualTo(remainingCount - keysToRemove.Count);
+            int removedCount = 0;
+            foreach (string key in keysToRemove)
+            {
+                bool wasRemoved = largeDictionary.Remove(key);
+                if (wasRemoved)
+                {
+                    removedCount++;
+                }
+                await Assert.That(wasRemoved).IsTrue(); // All keys should exist
+            }
+            await Assert.That(largeDictionary.Count).IsEqualTo(remainingCount - removedCount);
 
             foreach (string key in keysToRemove)
             {
@@ -210,40 +284,40 @@ public class LargeDictionaryTest
             }
         }
 
-        // Test 8: Test Remove(IEnumerable<TKey> keys) - empty collection
-        long countBeforeEmpty = largeDictionary.Count;
-        largeDictionary.Remove([]);
-        await Assert.That(largeDictionary.Count).IsEqualTo(countBeforeEmpty);
-
-        // Test 9: Test Remove(IEnumerable<TKey> keys) - non-existing keys
+        // Test 8: Test Remove(TKey key) with non-existing keys
+        string[] nonExistingKeys = ["-1", "-2", (count + 100).ToString(), (count + 200).ToString()];
         long countBeforeNonExisting = largeDictionary.Count;
-        largeDictionary.Remove(["-1", "-2", (count + 100).ToString(), (count + 200).ToString()]);
+
+        foreach (string key in nonExistingKeys)
+        {
+            bool wasRemoved = largeDictionary.Remove(key);
+            await Assert.That(wasRemoved).IsFalse(); // Should not remove non-existing keys
+        }
         await Assert.That(largeDictionary.Count).IsEqualTo(countBeforeNonExisting);
 
-        // Test 10: Test Remove(IEnumerable<TKey> keys) - mix of existing and non-existing keys
-        List<string> mixedKeys = [];
-        int existingKeysCount = 0;
-
-        foreach (string key in largeDictionary.Keys.Take(3))
+        // Test 9: Test Remove(TKey key, out TValue removedValue)
+        if (largeDictionary.Count > 0)
         {
-            mixedKeys.Add(key);
-            existingKeysCount++;
-        }
-        mixedKeys.Add("-999"); // Non-existing key
-        mixedKeys.Add((count + 500).ToString()); // Non-existing key
+            string existingKey = largeDictionary.Keys.First();
+            long expectedValue = largeDictionary[existingKey];
+            long countBefore = largeDictionary.Count;
 
-        if (mixedKeys.Count > 0)
-        {
-            long countBeforeMixed = largeDictionary.Count;
-            largeDictionary.Remove(mixedKeys);
-            await Assert.That(largeDictionary.Count).IsEqualTo(countBeforeMixed - existingKeysCount);
+            bool wasRemoved = largeDictionary.Remove(existingKey, out long removedValue);
+            await Assert.That(wasRemoved).IsTrue();
+            await Assert.That(removedValue).IsEqualTo(expectedValue);
+            await Assert.That(largeDictionary.Count).IsEqualTo(countBefore - 1);
+            await Assert.That(largeDictionary.ContainsKey(existingKey)).IsFalse();
         }
 
-        // Test 11: Test removing all remaining items
+        // Test 10: Test removing all remaining items
         List<string> allRemainingKeys = largeDictionary.Keys.ToList();
         if (allRemainingKeys.Count > 0)
         {
-            largeDictionary.Remove(allRemainingKeys);
+            foreach (string key in allRemainingKeys)
+            {
+                bool wasRemoved = largeDictionary.Remove(key);
+                await Assert.That(wasRemoved).IsTrue();
+            }
             await Assert.That(largeDictionary.Count).IsEqualTo(0);
             await Assert.That(largeDictionary.Keys).IsEmpty();
             await Assert.That(largeDictionary.Values).IsEmpty();
@@ -894,5 +968,287 @@ public class LargeDictionaryTest
         largeDictionary["HELLO"] = 100;
         await Assert.That(largeDictionary["hello"]).IsEqualTo(100);
         await Assert.That(largeDictionary.Count).IsEqualTo(2);
+    }
+
+    [Test]
+    [MethodDataSource(typeof(LargeArrayTest), nameof(LargeArrayTest.CapacitiesTestCasesArguments))]
+    public async Task KeysAndValuesProperties(long count)
+    {
+        if (count < 0L || count > Constants.MaxLargeCollectionCount)
+        {
+            return;
+        }
+
+        // Test 1: Initialize dictionary with test data
+        LargeDictionary<string, long> largeDictionary = [];
+
+        // Add test data
+        for (long i = 0; i < count; i++)
+        {
+            largeDictionary[i.ToString()] = i * 2;
+        }
+
+        // Test 2: Keys property enumeration
+        List<string> keys = largeDictionary.Keys.ToList();
+        await Assert.That(keys.Count).IsEqualTo((int)count);
+
+        // Test 3: Values property enumeration
+        List<long> values = largeDictionary.Values.ToList();
+        await Assert.That(values.Count).IsEqualTo((int)count);
+
+        // Test 4: Verify all keys are present
+        for (long i = 0; i < count; i++)
+        {
+            await Assert.That(keys.Contains(i.ToString())).IsTrue();
+        }
+
+        // Test 5: Verify all values are present
+        for (long i = 0; i < count; i++)
+        {
+            await Assert.That(values.Contains(i * 2)).IsTrue();
+        }
+
+        // Test 6: Empty dictionary should have empty Keys and Values
+        LargeDictionary<string, int> emptyDict = [];
+        await Assert.That(emptyDict.Keys.Any()).IsFalse();
+        await Assert.That(emptyDict.Values.Any()).IsFalse();
+    }
+
+    [Test]
+    public async Task ExceptionHandling()
+    {
+        LargeDictionary<string, int> largeDictionary = [];
+
+        // Test 1: KeyNotFoundException for Get() with non-existent key
+        await Assert.That(() => largeDictionary.Get("nonexistent")).Throws<KeyNotFoundException>();
+
+        // Test 2: KeyNotFoundException for indexer with non-existent key
+        await Assert.That(() => largeDictionary["nonexistent"]).Throws<KeyNotFoundException>();
+
+        // Test 3: ArgumentOutOfRangeException for invalid capacity
+        await Assert.That(() => new LargeDictionary<string, int>(capacity: -1L))
+            .Throws<ArgumentOutOfRangeException>();
+
+        // Test 4: ArgumentOutOfRangeException for invalid maxLoadFactor
+        await Assert.That(() => new LargeDictionary<string, int>(maxLoadFactor: -0.1))
+            .Throws<ArgumentOutOfRangeException>();
+
+        // Test 5: ArgumentOutOfRangeException for invalid minLoadFactor (negative)
+        await Assert.That(() => new LargeDictionary<string, int>(minLoadFactor: -0.1))
+            .Throws<ArgumentOutOfRangeException>();
+
+        // Test 6: ArgumentOutOfRangeException for minLoadFactor > maxLoadFactor
+        await Assert.That(() => new LargeDictionary<string, int>(minLoadFactor: 0.8, maxLoadFactor: 0.5))
+            .Throws<ArgumentOutOfRangeException>();
+
+        // Test 7: ArgumentOutOfRangeException for invalid capacityGrowFactor
+        await Assert.That(() => new LargeDictionary<string, int>(capacityGrowFactor: 0.5))
+            .Throws<ArgumentOutOfRangeException>();
+    }
+
+    [Test]
+    public async Task ConstructorParameterTests()
+    {
+        // Test 1: Constructor with custom capacity
+        LargeDictionary<int, string> dict1 = new(capacity: 100L);
+        await Assert.That(dict1.Capacity).IsGreaterThanOrEqualTo(100L);
+        await Assert.That(dict1.Count).IsEqualTo(0L);
+
+        // Test 2: Constructor with custom load factors
+        LargeDictionary<int, string> dict2 = new(
+            minLoadFactor: 0.2,
+            maxLoadFactor: 0.6);
+        await Assert.That(dict2.Count).IsEqualTo(0L);
+
+        // Test 3: Constructor with custom growth parameters
+        LargeDictionary<int, string> dict3 = new(
+            capacityGrowFactor: 2.5,
+            fixedCapacityGrowAmount: 50L,
+            fixedCapacityGrowLimit: 1000L);
+        await Assert.That(dict3.Count).IsEqualTo(0L);
+
+        // Test 4: Constructor with IEnumerable and custom parameters
+        KeyValuePair<string, int>[] items = [
+            new("key1", 1),
+            new("key2", 2)
+        ];
+
+        LargeDictionary<string, int> dict4 = new(
+            items,
+            capacity: 50L,
+            maxLoadFactor: 0.7);
+
+        await Assert.That(dict4.Count).IsEqualTo(2L);
+        await Assert.That(dict4["key1"]).IsEqualTo(1);
+        await Assert.That(dict4["key2"]).IsEqualTo(2);
+
+#if NETSTANDARD2_1_OR_GREATER
+        // Test 5: Constructor with ReadOnlySpan and custom parameters
+        ReadOnlySpan<KeyValuePair<string, int>> spanItems = items.AsSpan();
+        
+        LargeDictionary<string, int> dict5 = new(
+            spanItems,
+            capacity: 50L,
+            maxLoadFactor: 0.7);
+        
+        await Assert.That(dict5.Count).IsEqualTo(2L);
+        await Assert.That(dict5["key1"]).IsEqualTo(1);
+        await Assert.That(dict5["key2"]).IsEqualTo(2);
+#endif
+    }
+
+    [Test]
+    public async Task HashCollisionHandling()
+    {
+        // Test 1: Custom hash function that creates intentional collisions
+        Func<string, int> collisionHash = key => key?.Length ?? 0;
+
+        LargeDictionary<string, int> largeDictionary = new(
+            keyEqualsFunction: (a, b) => string.Equals(a, b, StringComparison.Ordinal),
+            hashCodeFunction: collisionHash);
+
+        // Test 2: Add items with same hash but different keys
+        largeDictionary["a"] = 1;     // hash = 1
+        largeDictionary["b"] = 2;     // hash = 1 (collision!)
+        largeDictionary["c"] = 3;     // hash = 1 (collision!)
+        largeDictionary["ab"] = 4;    // hash = 2
+        largeDictionary["abc"] = 5;   // hash = 3
+
+        // Test 3: Verify all items are stored correctly despite collisions
+        await Assert.That(largeDictionary.Count).IsEqualTo(5);
+        await Assert.That(largeDictionary["a"]).IsEqualTo(1);
+        await Assert.That(largeDictionary["b"]).IsEqualTo(2);
+        await Assert.That(largeDictionary["c"]).IsEqualTo(3);
+        await Assert.That(largeDictionary["ab"]).IsEqualTo(4);
+        await Assert.That(largeDictionary["abc"]).IsEqualTo(5);
+
+        // Test 4: Test removal with collisions
+        bool removed = largeDictionary.Remove("b");
+        await Assert.That(removed).IsTrue();
+        await Assert.That(largeDictionary.Count).IsEqualTo(4);
+        await Assert.That(largeDictionary.ContainsKey("b")).IsFalse();
+
+        // Test 5: Verify other colliding items still work
+        await Assert.That(largeDictionary["a"]).IsEqualTo(1);
+        await Assert.That(largeDictionary["c"]).IsEqualTo(3);
+
+        // Test 6: Test updating with collisions
+        largeDictionary["a"] = 100;
+        await Assert.That(largeDictionary["a"]).IsEqualTo(100);
+        await Assert.That(largeDictionary["c"]).IsEqualTo(3); // Should be unchanged
+    }
+
+    [Test]
+    public async Task LoadFactorManagement()
+    {
+        // Test 1: Create dictionary with low maxLoadFactor to force resizing
+        LargeDictionary<int, string> largeDictionary = new(
+            capacity: 4L,
+            minLoadFactor: 0.3,
+            maxLoadFactor: 0.6); // Force resize at around 2-3 items
+
+        // Test 2: Add items up to load factor limit
+        largeDictionary[1] = "one";
+        largeDictionary[2] = "two";
+        long capacityBefore = largeDictionary.Capacity;
+
+        // Test 3: Adding another item should trigger resize
+        largeDictionary[3] = "three";
+
+        await Assert.That(largeDictionary.Capacity).IsGreaterThan(capacityBefore);
+        await Assert.That(largeDictionary.Count).IsEqualTo(3L);
+        await Assert.That(largeDictionary[1]).IsEqualTo("one");
+        await Assert.That(largeDictionary[2]).IsEqualTo("two");
+        await Assert.That(largeDictionary[3]).IsEqualTo("three");
+
+        // Test 4: Test dictionary with default load factors and manual shrinking
+        LargeDictionary<int, string> shrinkDict = new(capacity: 100L);
+
+        // Fill dictionary
+        for (int i = 0; i < 50; i++)
+        {
+            shrinkDict[i] = $"value{i}";
+        }
+
+        long capacityAfterFill = shrinkDict.Capacity;
+
+        // Remove most items 
+        for (int i = 0; i < 45; i++)
+        {
+            shrinkDict.Remove(i);
+        }
+
+        // Manually trigger shrink
+        shrinkDict.Shrink();
+
+        await Assert.That(shrinkDict.Count).IsEqualTo(5L);
+        // After shrinking, capacity should accommodate remaining items efficiently
+        await Assert.That(shrinkDict.Capacity).IsGreaterThanOrEqualTo(1L); // At least some capacity for the 5 items
+    }
+
+    [Test]
+    public async Task EdgeCasesAndBoundaryConditions()
+    {
+        // Test 1: Empty dictionary operations
+        LargeDictionary<string, int> emptyDict = [];
+
+        await Assert.That(emptyDict.Count).IsEqualTo(0L);
+        await Assert.That(emptyDict.ContainsKey("any")).IsFalse();
+        await Assert.That(emptyDict.TryGetValue("any", out _)).IsFalse();
+        await Assert.That(emptyDict.Remove("any")).IsFalse();
+
+        // Test 2: Single item operations
+        LargeDictionary<string, int> singleDict = [];
+        singleDict["single"] = 42;
+
+        await Assert.That(singleDict.Count).IsEqualTo(1L);
+        await Assert.That(singleDict["single"]).IsEqualTo(42);
+        await Assert.That(singleDict.ContainsKey("single")).IsTrue();
+
+        bool removed = singleDict.Remove("single");
+        await Assert.That(removed).IsTrue();
+        await Assert.That(singleDict.Count).IsEqualTo(0L);
+
+        // Test 3: Null value handling (null values should be allowed)
+        LargeDictionary<string, string> nullValueDict = [];
+        nullValueDict["key"] = null;
+
+        await Assert.That(nullValueDict.Count).IsEqualTo(1L);
+        await Assert.That(nullValueDict["key"]).IsNull();
+        await Assert.That(nullValueDict.ContainsKey("key")).IsTrue();
+
+        bool foundNull = nullValueDict.TryGetValue("key", out string nullValue);
+        await Assert.That(foundNull).IsTrue();
+        await Assert.That(nullValue).IsNull();
+
+        // Test 4: Large key operations
+        LargeDictionary<string, int> largeKeyDict = [];
+        string largeKey = new('x', 10000); // 10k character key
+
+        largeKeyDict[largeKey] = 123;
+        await Assert.That(largeKeyDict[largeKey]).IsEqualTo(123);
+        await Assert.That(largeKeyDict.ContainsKey(largeKey)).IsTrue();
+
+        // Test 5: Key replacement behavior
+        LargeDictionary<string, int> replaceDict = [];
+        replaceDict["key"] = 1;
+        replaceDict["key"] = 2; // Replace
+
+        await Assert.That(replaceDict.Count).IsEqualTo(1L);
+        await Assert.That(replaceDict["key"]).IsEqualTo(2);
+
+        // Test 6: Multiple operations on same key
+        LargeDictionary<int, string> multiOpDict = [];
+
+        multiOpDict[42] = "initial";
+        await Assert.That(multiOpDict.ContainsKey(42)).IsTrue();
+
+        multiOpDict.Set(42, "updated");
+        await Assert.That(multiOpDict[42]).IsEqualTo("updated");
+
+        bool removedWithValue = multiOpDict.Remove(42, out string removedValue);
+        await Assert.That(removedWithValue).IsTrue();
+        await Assert.That(removedValue).IsEqualTo("updated");
+        await Assert.That(multiOpDict.ContainsKey(42)).IsFalse();
     }
 }

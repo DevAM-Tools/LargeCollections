@@ -161,20 +161,8 @@ public class LargeArrayTest
         await Assert.That(() => largeArray.Set(capacity, 0L)).Throws<IndexOutOfRangeException>();
         await Assert.That(() => largeArray.Set(capacity + 1L, 0L)).Throws<IndexOutOfRangeException>();
 
-        // Test GetRef method
-        for (long i = 0; i < capacity; i++)
-        {
-            ref long refValue = ref largeArray.GetRef(i);
-            // Modify through reference
-            refValue = i;
-            await Assert.That(largeArray[i]).IsEqualTo(i);
-            await Assert.That(largeArray.Get(i)).IsEqualTo(i);
-        }
-
-        // Test GetRef method bounds checking
-        await Assert.That(() => largeArray.GetRef(-1)).Throws<IndexOutOfRangeException>();
-        await Assert.That(() => largeArray.GetRef(capacity)).Throws<IndexOutOfRangeException>();
-        await Assert.That(() => largeArray.GetRef(capacity + 1L)).Throws<IndexOutOfRangeException>();
+        // Test IRefAccess functionality if the array implements it
+        await TestAllRefAccess(largeArray, capacity, offset);
 
         // Reset array to original ascending order for consistency
         for (long i = 0; i < capacity; i++)
@@ -248,13 +236,13 @@ public class LargeArrayTest
         }
 
         // Test 6: Multiple enumerations (should be repeatable)
-        var firstEnumeration = largeArray.GetAll(offset, count).ToArray();
-        var secondEnumeration = largeArray.GetAll(offset, count).ToArray();
+        long[] firstEnumeration = largeArray.GetAll(offset, count).ToArray();
+        long[] secondEnumeration = largeArray.GetAll(offset, count).ToArray();
         await Assert.That(firstEnumeration).IsEquivalentTo(secondEnumeration);
 
         // Test 7: Enumeration during modification (if supported)
-        var enumerable = largeArray.GetAll(offset, count);
-        var enumerator = enumerable.GetEnumerator();
+        IEnumerable<long> enumerable = largeArray.GetAll(offset, count);
+        IEnumerator<long> enumerator = enumerable.GetEnumerator();
 
         // Start enumeration
         bool hasFirst = enumerator.MoveNext();
@@ -298,18 +286,18 @@ public class LargeArrayTest
         // Test 9: LINQ operations on enumeration
         if (capacity > 0)
         {
-            var firstElement = largeArray.FirstOrDefault();
+            long firstElement = largeArray.FirstOrDefault();
             await Assert.That(firstElement).IsEqualTo(0L);
 
-            var lastElement = largeArray.LastOrDefault();
+            long lastElement = largeArray.LastOrDefault();
             await Assert.That(lastElement).IsEqualTo(capacity - 1L);
 
             if (count > 0)
             {
-                var rangedFirst = largeArray.GetAll(offset, count).FirstOrDefault();
+                long rangedFirst = largeArray.GetAll(offset, count).FirstOrDefault();
                 await Assert.That(rangedFirst).IsEqualTo(offset);
 
-                var rangedLast = largeArray.GetAll(offset, count).LastOrDefault();
+                long rangedLast = largeArray.GetAll(offset, count).LastOrDefault();
                 await Assert.That(rangedLast).IsEqualTo(offset + count - 1L);
             }
         }
@@ -325,7 +313,7 @@ public class LargeArrayTest
         // Test 11: ToArray() if available
         if (capacity <= int.MaxValue)
         {
-            var array = largeArray.ToArray();
+            long[] array = largeArray.ToArray();
             await Assert.That(array.Length).IsEqualTo((int)capacity);
             await Assert.That(array).IsEquivalentTo(LargeEnumerable.Range(capacity));
         }
@@ -350,7 +338,7 @@ public class LargeArrayTest
             largeArray[1] = 0L;
             largeArray[capacity - 1] = long.MaxValue;
 
-            var enumerated = largeArray.ToArray();
+            long[] enumerated = largeArray.ToArray();
             await Assert.That(enumerated[0]).IsEqualTo(long.MinValue);
             await Assert.That(enumerated[1]).IsEqualTo(0L);
             await Assert.That(enumerated[capacity - 1]).IsEqualTo(long.MaxValue);
@@ -386,7 +374,7 @@ public class LargeArrayTest
         if (capacity > 1000L)
         {
             long elementCount = 0L;
-            foreach (var element in largeArray)
+            foreach (long element in largeArray)
             {
                 elementCount++;
                 if (elementCount > 1000L) break; // Don't run too long in tests
@@ -398,10 +386,10 @@ public class LargeArrayTest
         if (capacity > 0 && count > 0)
         {
             long outerCount = 0L;
-            foreach (var outerElement in largeArray.GetAll(offset, Math.Min(count, 3L)))
+            foreach (long outerElement in largeArray.GetAll(offset, Math.Min(count, 3L)))
             {
                 long innerCount = 0L;
-                foreach (var innerElement in largeArray.GetAll(offset, Math.Min(count, 2L)))
+                foreach (long innerElement in largeArray.GetAll(offset, Math.Min(count, 2L)))
                 {
                     await Assert.That(innerElement).IsGreaterThanOrEqualTo(offset);
                     innerCount++;
@@ -536,11 +524,6 @@ public class LargeArrayTest
         long capacity = largeArray.Count;
         long count = capacity - 2L * offset;
 
-        // Test argument validation for ranged DoForEach
-        await Assert.That(() => largeArray.DoForEach((ref long i) => { }, -1L, count)).Throws<ArgumentException>();
-        await Assert.That(() => largeArray.DoForEach((ref long i) => { }, 0L, -1L)).Throws<ArgumentException>();
-        await Assert.That(() => largeArray.DoForEach((ref long i) => { }, 1L, capacity)).Throws<ArgumentException>();
-
         if (count < 0L || offset + count > capacity)
         {
             return;
@@ -560,20 +543,7 @@ public class LargeArrayTest
             expectedValue++;
         });
 
-        // Test 2: DoForEach with RefAction<T> (can modify)
-        largeArray.DoForEach(static (ref long i) =>
-        {
-            i++;
-        });
-        await Assert.That(largeArray).IsEquivalentTo(LargeEnumerable.Range(capacity).Select(x => x + 1));
-
-        // Reset array
-        for (long i = 0; i < capacity; i++)
-        {
-            largeArray[i] = i;
-        }
-
-        // Test 3: DoForEach with ActionWithUserData<T, TUserData>
+        // Test 2: DoForEach with ActionWithUserData<T, TUserData>
         long sum = 0L;
         largeArray.DoForEach(static (long value, ref long userData) =>
         {
@@ -583,25 +553,7 @@ public class LargeArrayTest
         long expectedSum = largeArray.Sum();
         await Assert.That(sum).IsEqualTo(expectedSum);
 
-        // Test 4: DoForEach with RefActionWithUserData<T, TUserData>
-        sum = 0L;
-        largeArray.DoForEach(static (ref long value, ref long userData) =>
-        {
-            userData += value;
-            value *= 2;
-        }, ref sum);
-
-        expectedSum = LargeEnumerable.Range(capacity).Sum();
-        await Assert.That(sum).IsEqualTo(expectedSum);
-        await Assert.That(largeArray).IsEquivalentTo(LargeEnumerable.Range(capacity).Select(x => x * 2));
-
-        // Reset array
-        for (long i = 0; i < capacity; i++)
-        {
-            largeArray[i] = i;
-        }
-
-        // Test 5: Ranged DoForEach with Action<T>
+        // Test 3: Ranged DoForEach with Action<T>
         expectedValue = offset;
         largeArray.DoForEach(async value =>
         {
@@ -609,32 +561,7 @@ public class LargeArrayTest
             expectedValue++;
         }, offset, count);
 
-        // Test 6: Ranged DoForEach with RefAction<T>
-        largeArray.DoForEach((ref long i) =>
-        {
-            i = -i;
-        }, offset, count);
-
-        // Verify ranged modification
-        for (long i = 0; i < capacity; i++)
-        {
-            if (i >= offset && i < offset + count)
-            {
-                await Assert.That(largeArray[i]).IsEqualTo(-i);
-            }
-            else
-            {
-                await Assert.That(largeArray[i]).IsEqualTo(i);
-            }
-        }
-
-        // Reset array
-        for (long i = 0; i < capacity; i++)
-        {
-            largeArray[i] = i;
-        }
-
-        // Test 7: Ranged DoForEach with ActionWithUserData<T, TUserData>
+        // Test 4: Ranged DoForEach with ActionWithUserData<T, TUserData>
         sum = 0L;
         largeArray.DoForEach(static (long value, ref long userData) =>
         {
@@ -644,29 +571,24 @@ public class LargeArrayTest
         expectedSum = LargeEnumerable.Range(offset, count).Sum();
         await Assert.That(sum).IsEqualTo(expectedSum);
 
-        // Test 8: Ranged DoForEach with RefActionWithUserData<T, TUserData>
-        sum = 0L;
-        largeArray.DoForEach(static (ref long value, ref long userData) =>
-        {
-            userData += value;
-            value = -value;
-        }, offset, count, ref sum);
+        // Test IRefAccess functionality if the array implements it
+        await TestAllRefAccess(largeArray, capacity, offset);
+    }
 
-        expectedSum = LargeEnumerable.Range(offset, count).Sum();
-        await Assert.That(sum).IsEqualTo(expectedSum);
-
-        // Verify ranged modification
-        for (long i = 0; i < capacity; i++)
+    [Test]
+    [MethodDataSource(nameof(CapacitiesWithOffsetTestCasesArguments))]
+    public async Task RefAccess(long capacity, long offset)
+    {
+        // input check
+        if (capacity < 0 || capacity > Constants.MaxLargeCollectionCount)
         {
-            if (i >= offset && i < offset + count)
-            {
-                await Assert.That(largeArray[i]).IsEqualTo(-i);
-            }
-            else
-            {
-                await Assert.That(largeArray[i]).IsEqualTo(i);
-            }
+            return;
         }
+
+        LargeArray<long> largeArray = new(capacity);
+
+        // Test IRefAccess functionality
+        await TestAllRefAccess(largeArray, capacity, offset);
     }
 
     [Test]
@@ -1652,4 +1574,219 @@ public class LargeArrayTest
             }
         }
     }
+
+    #region RefAccess Static Test Methods
+
+    /// <summary>
+    /// Tests GetRef functionality including bounds checking if the array implements IRefAccessLargeArray.
+    /// </summary>
+    /// <param name="largeArray">The array to test</param>
+    /// <param name="capacity">The capacity/count of the array</param>
+    public static async Task TestGetRef(ILargeArray<long> largeArray, long capacity)
+    {
+        if (largeArray is not IRefAccessLargeArray<long> refAccessArray)
+        {
+            return; // Skip if not supported
+        }
+
+        // Test GetRef method
+        for (long i = 0; i < capacity; i++)
+        {
+            ref long refValue = ref refAccessArray.GetRef(i);
+            // Modify through reference
+            refValue = i * 10; // Use different value to verify ref access
+
+            // Verify the change was applied
+            await Assert.That(largeArray[i]).IsEqualTo(i * 10);
+        }
+
+        // Test GetRef method bounds checking
+        await Assert.That(() => refAccessArray.GetRef(-1)).Throws<IndexOutOfRangeException>();
+        await Assert.That(() => refAccessArray.GetRef(capacity)).Throws<IndexOutOfRangeException>();
+        await Assert.That(() => refAccessArray.GetRef(capacity + 1L)).Throws<IndexOutOfRangeException>();
+    }
+
+    /// <summary>
+    /// Tests DoForEach with RefAction functionality if the array implements IRefAccessLargeArray.
+    /// </summary>
+    /// <param name="largeArray">The array to test</param>
+    /// <param name="capacity">The capacity/count of the array</param>
+    public static async Task TestDoForEachRefAction(ILargeArray<long> largeArray, long capacity)
+    {
+        if (largeArray is not IRefAccessLargeArray<long> refAccessArray)
+        {
+            return; // Skip if not supported
+        }
+
+        // Initialize array with sequential values
+        for (long i = 0; i < capacity; i++)
+        {
+            largeArray[i] = i;
+        }
+
+        // Test DoForEach with RefAction<T> (can modify)
+        refAccessArray.DoForEach(static (ref long i) =>
+        {
+            i = i * 2; // Double each value
+        });
+
+        // Verify all values were doubled
+        for (long i = 0; i < capacity; i++)
+        {
+            await Assert.That(largeArray[i]).IsEqualTo(i * 2);
+        }
+    }
+
+    /// <summary>
+    /// Tests DoForEach with RefActionWithUserData functionality if the array implements IRefAccessLargeArray.
+    /// </summary>
+    /// <param name="largeArray">The array to test</param>
+    /// <param name="capacity">The capacity/count of the array</param>
+    public static async Task TestDoForEachRefActionWithUserData(ILargeArray<long> largeArray, long capacity)
+    {
+        if (largeArray is not IRefAccessLargeArray<long> refAccessArray)
+        {
+            return; // Skip if not supported
+        }
+
+        // Initialize array with sequential values
+        for (long i = 0; i < capacity; i++)
+        {
+            largeArray[i] = i;
+        }
+
+        // Test DoForEach with RefActionWithUserData<T, TUserData>
+        long sum = 0L;
+        refAccessArray.DoForEach(static (ref long value, ref long userData) =>
+        {
+            userData += value;
+            value = -value; // Negate the value
+        }, ref sum);
+
+        long expectedSum = LargeEnumerable.Range(capacity).Sum();
+        await Assert.That(sum).IsEqualTo(expectedSum);
+
+        // Verify all values were negated
+        for (long i = 0; i < capacity; i++)
+        {
+            await Assert.That(largeArray[i]).IsEqualTo(-i);
+        }
+    }
+
+    /// <summary>
+    /// Tests ranged DoForEach with RefAction functionality if the array implements IRefAccessLargeArray.
+    /// </summary>
+    /// <param name="largeArray">The array to test</param>
+    /// <param name="capacity">The capacity/count of the array</param>
+    /// <param name="offset">The offset for the range</param>
+    /// <param name="count">The count for the range</param>
+    public static async Task TestDoForEachRangedRefAction(ILargeArray<long> largeArray, long capacity, long offset, long count)
+    {
+        if (largeArray is not IRefAccessLargeArray<long> refAccessArray || count <= 0 || offset + count > capacity)
+        {
+            return; // Skip if not supported or invalid range
+        }
+
+        // Initialize array with sequential values
+        for (long i = 0; i < capacity; i++)
+        {
+            largeArray[i] = i;
+        }
+
+        // Test argument validation for ranged DoForEach
+        await Assert.That(() => refAccessArray.DoForEach((ref long i) => { }, -1L, count)).Throws<ArgumentException>();
+        await Assert.That(() => refAccessArray.DoForEach((ref long i) => { }, 0L, -1L)).Throws<ArgumentException>();
+        await Assert.That(() => refAccessArray.DoForEach((ref long i) => { }, 1L, capacity)).Throws<ArgumentException>();
+
+        // Test ranged DoForEach with RefAction<T>
+        refAccessArray.DoForEach((ref long i) =>
+        {
+            i = -i;
+        }, offset, count);
+
+        // Verify ranged modification
+        for (long i = 0; i < capacity; i++)
+        {
+            if (i >= offset && i < offset + count)
+            {
+                await Assert.That(largeArray[i]).IsEqualTo(-i);
+            }
+            else
+            {
+                await Assert.That(largeArray[i]).IsEqualTo(i);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Tests ranged DoForEach with RefActionWithUserData functionality if the array implements IRefAccessLargeArray.
+    /// </summary>
+    /// <param name="largeArray">The array to test</param>
+    /// <param name="capacity">The capacity/count of the array</param>
+    /// <param name="offset">The offset for the range</param>
+    /// <param name="count">The count for the range</param>
+    public static async Task TestDoForEachRangedRefActionWithUserData(ILargeArray<long> largeArray, long capacity, long offset, long count)
+    {
+        if (largeArray is not IRefAccessLargeArray<long> refAccessArray || count <= 0 || offset + count > capacity)
+        {
+            return; // Skip if not supported or invalid range
+        }
+
+        // Initialize array with sequential values
+        for (long i = 0; i < capacity; i++)
+        {
+            largeArray[i] = i;
+        }
+
+        // Test ranged DoForEach with RefActionWithUserData<T, TUserData>
+        long sum = 0L;
+        refAccessArray.DoForEach(static (ref long value, ref long userData) =>
+        {
+            userData += value;
+            value = value * 3; // Triple the value
+        }, offset, count, ref sum);
+
+        long expectedSum = LargeEnumerable.Range(offset, count).Sum();
+        await Assert.That(sum).IsEqualTo(expectedSum);
+
+        // Verify ranged modification
+        for (long i = 0; i < capacity; i++)
+        {
+            if (i >= offset && i < offset + count)
+            {
+                await Assert.That(largeArray[i]).IsEqualTo(i * 3);
+            }
+            else
+            {
+                await Assert.That(largeArray[i]).IsEqualTo(i);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Runs all ref access tests on the provided array if it implements IRefAccessLargeArray.
+    /// </summary>
+    /// <param name="largeArray">The array to test</param>
+    /// <param name="capacity">The capacity/count of the array</param>
+    /// <param name="offset">Optional offset for ranged tests (default: 1)</param>
+    public static async Task TestAllRefAccess(ILargeArray<long> largeArray, long capacity, long offset = 1L)
+    {
+        if (capacity == 0 || largeArray is not IRefAccessLargeArray<long>)
+        {
+            return; // Skip tests for empty arrays or arrays without ref access
+        }
+
+        await TestGetRef(largeArray, capacity);
+        await TestDoForEachRefAction(largeArray, capacity);
+        await TestDoForEachRefActionWithUserData(largeArray, capacity);
+
+        long rangeCount = Math.Max(0, capacity - 2L * offset);
+        if (rangeCount > 0)
+        {
+            await TestDoForEachRangedRefAction(largeArray, capacity, offset, rangeCount);
+            await TestDoForEachRangedRefActionWithUserData(largeArray, capacity, offset, rangeCount);
+        }
+    }
+
+    #endregion
 }

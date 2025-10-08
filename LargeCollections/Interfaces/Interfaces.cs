@@ -79,17 +79,29 @@ public interface ILargeCollection<T> : IReadOnlyLargeCollection<T>
     /// <param name="items">An enumeration of items that shall be added to the collection.</param>
     void AddRange(IEnumerable<T> items);
 
+#if NETSTANDARD2_1_OR_GREATER
+    /// <summary>
+    /// Adds multiple <paramref name="items"/> to the collection.
+    /// Depending on the actual collection implementation exisitng items may be replaced.
+    /// </summary>
+    /// <param name="items">A span of items that shall be added to the collection.</param>
+    void AddRange(ReadOnlySpan<T> items);
+#endif
+
     /// <summary>
     /// Removes the first occurance of an <paramref name="item"/> from the collection.
     /// </summary>
     /// <param name="item">The <paramref name="item"/> that shall be removed from the collection.</param>
-    void Remove(T item);
+    /// <returns>true if the <paramref name="item"/> was found and removed. Otherwise false is returned.</returns>
+    bool Remove(T item);
 
     /// <summary>
-    /// Removes multiple <paramref name="items"/> from the collection.
+    /// Removes the first occurance of an <paramref name="item"/> from the collection.
     /// </summary>
-    /// <param name="items">An enumeration of items that shall be removed from the collection.</param>
-    void Remove(IEnumerable<T> items);
+    /// <param name="item">The <paramref name="item"/> that shall be removed from the collection.</param>
+    /// <param name="removedItem">The removed item will be assigned if the <paramref name="item"/> was found. Otherwise the <see cref="default(T)"/> will be assigned.</param>
+    /// <returns>true if the <paramref name="item"/> was found and removed. Otherwise false is returned.</returns>
+    bool Remove(T item, out T removedItem);
 
     /// <summary>
     /// Removes all items from the collection. Resets <see cref="IReadOnlyCollection{T}.Count"/> to 0;
@@ -213,13 +225,6 @@ public interface ILargeArray<T> : IReadOnlyLargeArray<T>
     new T this[long index] { get; set; }
 
     /// <summary>
-    /// Gets a reference to the item at the specified 0-based <paramref name="index"/> if <paramref name="index"/> is within the valid range.
-    /// </summary>
-    /// <param name="index">The 0-based <paramref name="index"/> of the location where the item shall be got from.</param>
-    /// <returns>A reference to the item which is located at the specified 0-based <paramref name="index"/> if <paramref name="index"/> was within the valid range.</returns>
-    ref T GetRef(long index);
-
-    /// <summary>
     /// Stores the item at the specified 0-based <paramref name="index"/> if <paramref name="index"/> is within the valid range.
     /// </summary>
     /// <param name="index">The 0-based <paramref name="index"/> of the location where the item shall be stored.</param>
@@ -246,6 +251,45 @@ public interface ILargeArray<T> : IReadOnlyLargeArray<T>
     /// <param name="leftIndex">The index of the first item.</param>
     /// <param name="rightIndex">The index of the second item.</param>
     void Swap(long leftIndex, long rightIndex);
+
+    /// <summary>
+    /// Copies <paramref name="count"/> items from the <paramref name="source"/> to this collection at <paramref name="targetOffset"/>.
+    /// </summary>
+    /// <param name="source">The source where the items will be copied from.</param>
+    /// <param name="sourceOffset">The offset where the first item will be copied from.</param>
+    /// <param name="targetOffset">The offset where the first item will be copied to.</param>
+    /// <param name="count">The number of items that will be copied.</param>
+    void CopyFrom(IReadOnlyLargeArray<T> source, long sourceOffset, long targetOffset, long count);
+
+    /// <summary>
+    /// Copies <paramref name="count"/> items from the <paramref name="source"/> to this collection at <paramref name="targetOffset"/>.
+    /// </summary>
+    /// <param name="source">The source where the items will be copied from.</param>
+    /// <param name="sourceOffset">The offset where the first item will be copied from.</param>
+    /// <param name="targetOffset">The offset where the first item will be copied to.</param>
+    /// <param name="count">The number of items that will be copied.</param>
+    void CopyFromArray(T[] source, int sourceOffset, long targetOffset, int count);
+
+#if NETSTANDARD2_1_OR_GREATER
+    /// <summary>
+    /// Copies <paramref name="count"/> items from the <paramref name="source"/> to this collection at <paramref name="targetOffset"/>.
+    /// </summary>
+    /// <param name="source">The source where the items will be copied from.</param>
+    /// <param name="sourceOffset">The offset where the first item will be copied from.</param>
+    /// <param name="targetOffset">The offset where the first item will be copied to.</param>
+    /// <param name="count">The number of items that will be copied.</param>
+    void CopyFromSpan(ReadOnlySpan<T> source, long targetOffset, int count);
+#endif
+}
+
+public interface IRefAccessLargeArray<T> : ILargeArray<T>
+{
+    /// <summary>
+    /// Gets a reference to the item at the specified 0-based <paramref name="index"/> if <paramref name="index"/> is within the valid range.
+    /// </summary>
+    /// <param name="index">The 0-based <paramref name="index"/> of the location where the item shall be got from.</param>
+    /// <returns>A reference to the item which is located at the specified 0-based <paramref name="index"/> if <paramref name="index"/> was within the valid range.</returns>
+    ref T GetRef(long index);
 
     /// <summary>
     /// Performs the <paramref name="action"/> with items of the collection.
@@ -282,44 +326,46 @@ public interface ILargeArray<T> : IReadOnlyLargeArray<T>
     /// <param name="offset">The <paramref name="offset"/> where the range starts.</param>
     /// <param name="count">The <paramref name="count"/> of elements that belong to the range.</param>
     void DoForEach<TUserData>(RefActionWithUserData<T, TUserData> action, long offset, long count, ref TUserData userData);
-
-    /// <summary>
-    /// Copies <paramref name="count"/> items from the <paramref name="source"/> to this collection at <paramref name="targetOffset"/>.
-    /// </summary>
-    /// <param name="source">The source where the items will be copied from.</param>
-    /// <param name="sourceOffset">The offset where the first item will be copied from.</param>
-    /// <param name="targetOffset">The offset where the first item will be copied to.</param>
-    /// <param name="count">The number of items that will be copied.</param>
-    void CopyFrom(IReadOnlyLargeArray<T> source, long sourceOffset, long targetOffset, long count);
-
-    /// <summary>
-    /// Copies <paramref name="count"/> items from the <paramref name="source"/> to this collection at <paramref name="targetOffset"/>.
-    /// </summary>
-    /// <param name="source">The source where the items will be copied from.</param>
-    /// <param name="sourceOffset">The offset where the first item will be copied from.</param>
-    /// <param name="targetOffset">The offset where the first item will be copied to.</param>
-    /// <param name="count">The number of items that will be copied.</param>
-    void CopyFromArray(T[] source, int sourceOffset, long targetOffset, int count);
-
-#if NETSTANDARD2_1_OR_GREATER
-    /// <summary>
-    /// Copies <paramref name="count"/> items from the <paramref name="source"/> to this collection at <paramref name="targetOffset"/>.
-    /// </summary>
-    /// <param name="source">The source where the items will be copied from.</param>
-    /// <param name="sourceOffset">The offset where the first item will be copied from.</param>
-    /// <param name="targetOffset">The offset where the first item will be copied to.</param>
-    /// <param name="count">The number of items that will be copied.</param>
-    void CopyFromSpan(ReadOnlySpan<T> source, long targetOffset, int count);
-#endif
 }
 
 public interface ILargeList<T> : ILargeArray<T>, ILargeCollection<T>
 {
     /// <summary>
+    /// Removes the first occurance of an <paramref name="item"/> from the collection.
+    /// </summary>
+    /// <param name="item">The <paramref name="item"/> that shall be removed from the collection.</param>
+    /// <param name="preserveOrder">If set to false the order of items may change but the operation will be faster.</param>
+    /// <returns>true if the <paramref name="item"/> was found and removed. Otherwise false is returned.</returns>
+    bool Remove(T item, bool preserveOrder);
+
+    /// <summary>
+    /// Removes the first occurance of an <paramref name="item"/> from the collection.
+    /// </summary>
+    /// <param name="item">The <paramref name="item"/> that shall be removed from the collection.</param>
+    /// <param name="preserveOrder">If set to false the order of items may change but the operation will be faster.</param>
+    /// <param name="removedItem">The removed item will be assigned if the <paramref name="item"/> was found. Otherwise the <see cref="default(T)"/> will be assigned.</param>
+    /// <returns>true if the <paramref name="item"/> was found and removed. Otherwise false is returned.</returns>
+    bool Remove(T item, bool preserveOrder, out T removedItem);
+
+    /// <summary>
     /// Removes the item at the specified 0-based <paramref name="index"/> if <paramref name="index"/> is within the valid range.
     /// </summary>
     /// <param name="index">The 0-based <paramref name="index"/> of the location where the item shall be removed.</param>
-    void RemoveAt(long index);
+    /// <returns>The item which was located at the specified 0-based <paramref name="index"/> if <paramref name="index"/> was within the valid range.</returns>
+    T RemoveAt(long index);
+
+    /// <summary>
+    /// Removes the item at the specified 0-based <paramref name="index"/> if <paramref name="index"/> is within the valid range.
+    /// </summary>
+    /// <param name="index">The 0-based <paramref name="index"/> of the location where the item shall be removed.</param>
+    /// <param name="preserveOrder">If set to false the order of items may change but the operation will be faster.</param>
+    /// <returns>The item which was located at the specified 0-based <paramref name="index"/> if <paramref name="index"/> was within the valid range.</returns>
+    T RemoveAt(long index, bool preserveOrder);
+}
+
+public interface IRefAccessLargeList<T> : ILargeList<T>, IRefAccessLargeArray<T>
+{
+
 }
 
 public interface IReadOnlyLargeDictionary<TKey, TValue> : IReadOnlyLargeCollection<KeyValuePair<TKey, TValue>> where TKey : notnull
@@ -389,13 +435,18 @@ public interface ILargeDictionary<TKey, TValue> : IReadOnlyLargeDictionary<TKey,
     /// Removes the value that is associated with the specified <paramref name="key"/> that uniquely identifies the item.
     /// </summary>
     /// <param name="key">The <paramref name="key"/> that uniquely identifies the item.</param>
-    void Remove(TKey key);
+    /// <returns>true if the item was found and removed. Otherwise false is returned.</returns>
+    bool Remove(TKey key);
 
     /// <summary>
-    /// Removes multiple items that is associated with the specified <paramref name="keys"/> that uniquely identify the items.
+    /// Removes the value that is associated with the specified <paramref name="key"/> that uniquely identifies the item.
     /// </summary>
     /// <param name="key">The <paramref name="key"/> that uniquely identifies the item.</param>
-    void Remove(IEnumerable<TKey> keys);
+    /// <param name="removedValue">The removed value will be assigned if the item was found. Otherwise the <see cref="default(T)"/> will be assigned.</param>
+    /// <returns>true if the item was found and removed. Otherwise false is returned.</returns>
+    bool Remove(TKey key, out TValue removedValue);
+
+
 }
 
 

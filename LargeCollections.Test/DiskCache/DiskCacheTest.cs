@@ -349,6 +349,8 @@ public class DiskCacheTest : IDisposable
             .Throws<ArgumentNullException>();
         await Assert.That(() => diskCache.Remove((string)null))
             .Throws<ArgumentNullException>();
+        await Assert.That(() => diskCache.Remove((string)null, out _))
+            .Throws<ArgumentNullException>();
 
         // Test adding and getting values
         for (long i = 0; i < count; i++)
@@ -386,6 +388,8 @@ public class DiskCacheTest : IDisposable
         await Assert.That(() => diskCache.ContainsKey(null))
             .Throws<ArgumentNullException>();
         await Assert.That(() => diskCache.Remove((byte[])null))
+            .Throws<ArgumentNullException>();
+        await Assert.That(() => diskCache.Remove((byte[])null, out _))
             .Throws<ArgumentNullException>();
 
         // Test adding and getting values

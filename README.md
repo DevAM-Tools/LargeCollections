@@ -1,6 +1,6 @@
 # What is LargeCollections?
 
-LargeCollections is a library for .NET framework that offers a number of interfaces and types for collections that can store up to 1152921504606846976 items.
+LargeCollections is a library for .NET framework that offers a number of interfaces and types for collections that can store up to 1_152_921_504_606_846_976 items.
 In comparison many .NET standard collections are limited to about 2.1 billion items.
 
 Currently supported collections are:
@@ -10,12 +10,16 @@ Currently supported collections are:
 - LargeDictionary<TKey, TValue>
 - DiskCache<TKey, TValue>
 - SpatialDiskCache<long, TValue>
+- LargeObservableCollection<T>
+- ReadOnlyLargeObservableCollection<T>
 
 DiskCache<TKey, TValue> is a dictionary-like collection that allows to limit the amount of memory (RAM) in MB that will be used.
 Any memory requirement that exceeds this amount is automatically swapped out to disk. 
 Additionally it offers multi-threaded operations for performance improvements.
 
 SpatialDiskCache<long, TValue> is a DiskCache<long, TValue> that allows to create a spatial index for the contained elements that can be used for spatial queries.
+
+LargeObservableCollection<T> allows to monitor changes of a list-like collection. It is the equivalent of an ObservableCollection<T>. ReadOnlyLargeObservableCollection<T> allows to monitor changes to a collection while not providing the option of modifying it.
 
 Since many .NET API are designed to work with Streams the LargeWritableMemoryStream and LargeReadableMemoryStream implement a reusable wrapper around LargeList<byte> and IReadOnlyLargeArray<byte>.
 
