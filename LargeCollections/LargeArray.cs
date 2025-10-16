@@ -163,7 +163,7 @@ namespace LargeCollections
             _Storage.StorageCopyFromArray(source, sourceOffset, targetOffset, count);
         }
 
-#if NETSTANDARD2_1_OR_GREATER
+#if NETSTANDARD2_1_OR_GREATER || NETCOREAPP3_0_OR_GREATER || NET5_0_OR_GREATER
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public void CopyFromSpan(ReadOnlySpan<T> source, long targetOffset, int count)
         {
@@ -233,7 +233,7 @@ namespace LargeCollections
         }
 
 
-#if NETSTANDARD2_1_OR_GREATER
+#if NETSTANDARD2_1_OR_GREATER || NETCOREAPP3_0_OR_GREATER || NET5_0_OR_GREATER
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public void CopyToSpan(Span<T> target, long sourceOffset, int count)
         {

@@ -95,7 +95,7 @@ public class LargeDictionaryTest
         largeDictionary.AddRange([]);
         await Assert.That(largeDictionary.Count).IsEqualTo(count);
 
-#if NETSTANDARD2_1_OR_GREATER
+#if NETSTANDARD2_1_OR_GREATER || NETCOREAPP3_0_OR_GREATER || NET5_0_OR_GREATER
         // Test 6a: Test AddRange ReadOnlySpan version with empty span
         ReadOnlySpan<KeyValuePair<string, long>> emptySpan = [];
         largeDictionary.AddRange(emptySpan);
@@ -127,7 +127,7 @@ public class LargeDictionaryTest
             return;
         }
 
-#if NETSTANDARD2_1_OR_GREATER
+#if NETSTANDARD2_1_OR_GREATER || NETCOREAPP3_0_OR_GREATER || NET5_0_OR_GREATER
         LargeDictionary<string, long> largeDictionary = [];
 
         // Test AddRange with ReadOnlySpan
@@ -1082,7 +1082,7 @@ public class LargeDictionaryTest
         await Assert.That(dict4["key1"]).IsEqualTo(1);
         await Assert.That(dict4["key2"]).IsEqualTo(2);
 
-#if NETSTANDARD2_1_OR_GREATER
+#if NETSTANDARD2_1_OR_GREATER || NETCOREAPP3_0_OR_GREATER || NET5_0_OR_GREATER
         // Test 5: Constructor with ReadOnlySpan and custom parameters
         ReadOnlySpan<KeyValuePair<string, int>> spanItems = items.AsSpan();
         

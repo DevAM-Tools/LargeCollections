@@ -93,7 +93,7 @@ public static class StreamExtensions
             byte[][] storage = largeList.GetStorage();
             storage.StorageWriteToStream(stream, offset, count);
         }
-#if NETSTANDARD2_1_OR_GREATER
+#if NETSTANDARD2_1_OR_GREATER || NETCOREAPP3_0_OR_GREATER || NET5_0_OR_GREATER
         else
         {
             Span<byte> buffer = stackalloc byte[4096];
@@ -253,7 +253,7 @@ public static class StreamExtensions
             byte[][] storage = largeList.GetStorage();
             return storage.StorageReadFromStream(stream, offset, count);
         }
-#if NETSTANDARD2_1_OR_GREATER
+#if NETSTANDARD2_1_OR_GREATER || NETCOREAPP3_0_OR_GREATER || NET5_0_OR_GREATER
         else
         {
             Span<byte> buffer = stackalloc byte[4096];

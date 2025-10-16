@@ -943,7 +943,7 @@ public class ReadOnlyLargeObservableCollectionTest
         await Assert.That(tracker.CollectionChangedCount).IsGreaterThanOrEqualTo(1);
     }
 
-#if NETSTANDARD2_1_OR_GREATER
+#if NETSTANDARD2_1_OR_GREATER || NETCOREAPP3_0_OR_GREATER || NET5_0_OR_GREATER
     [Test]
     public async Task EventForwarding_CopyFromSpan_ForwardsEvents()
     {

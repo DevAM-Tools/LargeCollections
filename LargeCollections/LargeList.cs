@@ -133,7 +133,7 @@ public class LargeList<T> : IRefAccessLargeList<T>
         AddRange(items);
     }
 
-#if NETSTANDARD2_1_OR_GREATER
+#if NETSTANDARD2_1_OR_GREATER || NETCOREAPP3_0_OR_GREATER || NET5_0_OR_GREATER
     public LargeList(ReadOnlySpan<T> items,
             long capacity = 1L,
             double capacityGrowFactor = Constants.DefaultCapacityGrowFactor,
@@ -309,7 +309,7 @@ public class LargeList<T> : IRefAccessLargeList<T>
         Count += count;
     }
 
-#if NETSTANDARD2_1_OR_GREATER
+#if NETSTANDARD2_1_OR_GREATER || NETCOREAPP3_0_OR_GREATER || NET5_0_OR_GREATER
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void AddRange(ReadOnlySpan<T> source)
     {
@@ -413,7 +413,7 @@ public class LargeList<T> : IRefAccessLargeList<T>
 
         _Storage.StorageCopyFromArray(source, sourceOffset, targetOffset, count);
     }
-#if NETSTANDARD2_1_OR_GREATER
+#if NETSTANDARD2_1_OR_GREATER || NETCOREAPP3_0_OR_GREATER || NET5_0_OR_GREATER
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void CopyFromSpan(ReadOnlySpan<T> source, long targetOffset, int count)
     {
@@ -485,7 +485,7 @@ public class LargeList<T> : IRefAccessLargeList<T>
     }
 
 
-#if NETSTANDARD2_1_OR_GREATER
+#if NETSTANDARD2_1_OR_GREATER || NETCOREAPP3_0_OR_GREATER || NET5_0_OR_GREATER
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void CopyToSpan(Span<T> target, long sourceOffset, int count)
     {

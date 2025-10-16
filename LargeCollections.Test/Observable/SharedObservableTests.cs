@@ -168,12 +168,12 @@ public static class SharedObservableTests
             }
         }
 
-#if NETSTANDARD2_1_OR_GREATER
+#if NETSTANDARD2_1_OR_GREATER || NETCOREAPP3_0_OR_GREATER || NET5_0_OR_GREATER
         // Test CopyToSpan
         if (count <= int.MaxValue)
         {
-            Span<T> spanTarget = new T[count];
-            collection.CopyToSpan(spanTarget, sourceOffset, (int)count);
+            T[] spanTarget = new T[count];
+            collection.CopyToSpan(spanTarget.AsSpan(), sourceOffset, (int)count);
 
             for (long i = 0; i < count; i++)
             {

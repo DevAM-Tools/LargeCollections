@@ -476,7 +476,7 @@ public static class StorageExtensions
         }
     }
 
-#if NETSTANDARD2_1_OR_GREATER
+#if NETSTANDARD2_1_OR_GREATER || NETCOREAPP3_0_OR_GREATER || NET5_0_OR_GREATER
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal static void StorageCopyToSpan<T>(this T[][] source, Span<T> target, long sourceOffset, int count)
     {
@@ -538,7 +538,7 @@ public static class StorageExtensions
         }
     }
 
-#if NETSTANDARD2_1_OR_GREATER
+#if NETSTANDARD2_1_OR_GREATER || NETCOREAPP3_0_OR_GREATER || NET5_0_OR_GREATER
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal static void StorageCopyFromSpan<T>(this T[][] target, ReadOnlySpan<T> source, long targetOffset, int count)
     {

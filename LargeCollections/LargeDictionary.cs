@@ -103,7 +103,7 @@ public class LargeDictionary<TKey, TValue> : LargeSet<KeyValuePair<TKey, TValue>
         AddRange(items);
     }
 
-#if NETSTANDARD2_1_OR_GREATER
+#if NETSTANDARD2_1_OR_GREATER || NETCOREAPP3_0_OR_GREATER || NET5_0_OR_GREATER
     public LargeDictionary(ReadOnlySpan<KeyValuePair<TKey, TValue>> items,
         Func<TKey, TKey, bool> keyEqualsFunction = null,
         Func<TKey, int> hashCodeFunction = null,
@@ -241,7 +241,7 @@ public class LargeDictionary<TKey, TValue> : LargeSet<KeyValuePair<TKey, TValue>
         }
     }
 
-#if NETSTANDARD2_1_OR_GREATER
+#if NETSTANDARD2_1_OR_GREATER || NETCOREAPP3_0_OR_GREATER || NET5_0_OR_GREATER
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public override void AddRange(ReadOnlySpan<KeyValuePair<TKey, TValue>> items)
     {

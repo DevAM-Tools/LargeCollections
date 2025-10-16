@@ -174,7 +174,7 @@ public class LargeReadableMemoryStream : Stream
         return (int)maxReadableCount;
     }
 
-#if NETSTANDARD2_1_OR_GREATER
+#if NETSTANDARD2_1_OR_GREATER || NETCOREAPP3_0_OR_GREATER || NET5_0_OR_GREATER
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public override int Read(Span<byte> target)
     {

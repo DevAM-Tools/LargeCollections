@@ -1,33 +1,17 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFrameworks>netstandard2.0;netstandard2.1</TargetFrameworks>
-    <ImplicitUsings>enable</ImplicitUsings>
-    <Nullable>disable</Nullable>
-    <LangVersion>latest</LangVersion>
-    <Platforms>AnyCPU</Platforms>
-    <PlatformTarget>AnyCPU</PlatformTarget>
-    <Authors>DevAM</Authors>
-    <Company>DevAM</Company>
-    <Copyright>DevAM</Copyright>
-    <RepositoryType>git</RepositoryType>
+    <TargetFrameworks>netstandard2.0;netstandard2.1;net6.0;net8.0</TargetFrameworks>
     <PackageTags>
-      LargeCollection;LargeCollections;Large;Collection;Collections;LargeArray;LargeList;LargeSet;LargeDictionary;ReadOnlyLargeSpan;LargeSpan;Array;List;Set;Dictionary;Span;Concurrent;ConcurrentLargeArray;ConcurrentLargeList;ConcurrentLargeSet;ConcurrentLargeDictionary;LargeMemoryStream;Stream</PackageTags>
-    <NeutralLanguage>en</NeutralLanguage>
-    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+      LargeCollection;LargeCollections;Large;Collection;Collections;LargeArray;LargeList;LargeSet;LargeDictionary;ReadOnlyLargeSpan;LargeSpan;Array;List;Set;Dictionary;Span;Concurrent;ConcurrentLargeArray;ConcurrentLargeList;ConcurrentLargeSet;ConcurrentLargeDictionary;LargeMemoryStream;Stream
+    </PackageTags>
     <Description>Interfaces and types for large collections that can store up to 1_152_921_504_606_846_976
       items like arrays, lists, sets and dictionaries. (Many .NET standard collections are limited
       to about 2.1 billion items)</Description>
-    <PackageProjectUrl>https://github.com/DevAM-Tools/LargeCollections</PackageProjectUrl>
-    <RepositoryUrl>https://github.com/DevAM-Tools/LargeCollections</RepositoryUrl>
-    <PackageReadmeFile>README.md</PackageReadmeFile>
     <Title>LargeCollections</Title>
     <Product>LargeCollections</Product>
-    <Version>5.0.0</Version>
-    <AssemblyVersion>5.0.0</AssemblyVersion>
-    <FileVersion>5.0.0</FileVersion>
-    <SignAssembly>False</SignAssembly>
     <GeneratePackageOnBuild>True</GeneratePackageOnBuild>
+    <IncludeSymbols>true</IncludeSymbols>
     <PackageId>DevAM.LargeCollections</PackageId>
   </PropertyGroup>
 

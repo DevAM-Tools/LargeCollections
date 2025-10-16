@@ -680,7 +680,7 @@ public class DiskCache<TKey, TValue> : IDiskCache<TKey, TValue>, IDisposable whe
         }
     }
 
-#if NETSTANDARD2_1_OR_GREATER
+#if NETSTANDARD2_1_OR_GREATER || NETCOREAPP3_0_OR_GREATER || NET5_0_OR_GREATER
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void AddRange(ReadOnlySpan<KeyValuePair<TKey, TValue>> items)
     {

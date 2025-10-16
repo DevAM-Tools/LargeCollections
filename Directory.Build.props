@@ -1,0 +1,24 @@
+<Project>
+  <PropertyGroup>    
+		<ImplicitUsings>enable</ImplicitUsings>
+		<Nullable>disable</Nullable>
+		<LangVersion>latest</LangVersion>
+		<Deterministic>true</Deterministic>
+		<Platforms>AnyCPU</Platforms>
+		<PlatformTarget>AnyCPU</PlatformTarget>
+		<Authors>DevAM</Authors>
+		<Company>DevAM</Company>
+		<Copyright>DevAM</Copyright>
+		<RepositoryType>git</RepositoryType>
+		<NeutralLanguage>en</NeutralLanguage>
+		<PackageLicenseExpression>MIT</PackageLicenseExpression>
+		<PackageProjectUrl>https://github.com/DevAM-Tools/LargeCollections</PackageProjectUrl>
+		<RepositoryUrl>https://github.com/DevAM-Tools/LargeCollections</RepositoryUrl>
+		<PackageReadmeFile>README.md</PackageReadmeFile>
+		<Version>5.0.1</Version>
+		<AssemblyVersion>5.0.1</AssemblyVersion>
+		<FileVersion>5.0.1</FileVersion>
+		<SignAssembly>False</SignAssembly>
+		<ContinuousIntegrationBuild>true</ContinuousIntegrationBuild>
+  </PropertyGroup>
+</Project>

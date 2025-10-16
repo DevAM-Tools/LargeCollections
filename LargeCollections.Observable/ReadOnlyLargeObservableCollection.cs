@@ -195,7 +195,7 @@ public class ReadOnlyLargeObservableCollection<T> : IReadOnlyLargeObservableColl
     public void CopyToArray(T[] target, long sourceOffset, int targetOffset, int count)
         => _Inner.CopyToArray(target, sourceOffset, targetOffset, count);
 
-#if NETSTANDARD2_1_OR_GREATER
+#if NETSTANDARD2_1_OR_GREATER || NETCOREAPP3_0_OR_GREATER || NET5_0_OR_GREATER
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void CopyToSpan(Span<T> target, long sourceOffset, int count)
         => _Inner.CopyToSpan(target, sourceOffset, count);

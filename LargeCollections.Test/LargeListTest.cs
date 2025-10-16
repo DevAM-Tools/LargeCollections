@@ -499,7 +499,7 @@ public class LargeListTest
         await Assert.That(listFromEnum.MinLoadFactor).IsEqualTo(0.3);
         await Assert.That(listFromEnum.Count).IsEqualTo(5L);
 
-#if NETSTANDARD2_1_OR_GREATER
+#if NETSTANDARD2_1_OR_GREATER || NETCOREAPP3_0_OR_GREATER || NET5_0_OR_GREATER
         // Test 4: Test constructors with ReadOnlySpan
         ReadOnlySpan<int> span = items.AsSpan();
         LargeList<int> listFromSpan = new(span, minLoadFactor: 0.4);

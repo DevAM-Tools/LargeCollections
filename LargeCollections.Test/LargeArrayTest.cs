@@ -24,6 +24,7 @@ SOFTWARE.
 */
 
 using System.Collections;
+using TUnit.Core;
 
 namespace LargeCollections.Test;
 

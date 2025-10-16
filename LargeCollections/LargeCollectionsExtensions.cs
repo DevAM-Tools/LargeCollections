@@ -58,7 +58,7 @@ public static class LargeCollectionsExtensions
         }
     }
 
-#if NETSTANDARD2_1_OR_GREATER
+#if NETSTANDARD2_1_OR_GREATER || NETCOREAPP3_0_OR_GREATER || NET5_0_OR_GREATER
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static void CopyTo<T>(this ReadOnlySpan<T> source, ILargeArray<T> target, long targetOffset, int count)
     {

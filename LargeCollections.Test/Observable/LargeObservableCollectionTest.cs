@@ -86,7 +86,7 @@ public class LargeObservableCollectionTest
             await Assert.That(collectionFromArrayWithSuppress.Count).IsEqualTo(capacity);
         }
 
-#if NETSTANDARD2_1_OR_GREATER
+#if NETSTANDARD2_1_OR_GREATER || NETCOREAPP3_0_OR_GREATER || NET5_0_OR_GREATER
         // Test 7: Constructor with ReadOnlySpan
         if (capacity <= int.MaxValue && capacity > 0)
         {
@@ -247,11 +247,11 @@ public class LargeObservableCollectionTest
         await Assert.That(collectionEvent.Action).IsEqualTo(NotifyCollectionChangedAction.Reset);
     }
 
-#if NETSTANDARD2_1_OR_GREATER
+#if NETSTANDARD2_1_OR_GREATER || NETCOREAPP3_0_OR_GREATER || NET5_0_OR_GREATER
     [Test]
     public async Task AddRange_ReadOnlySpan_WorksCorrectly()
     {
-        LargeObservableCollection<double> collection = []
+        LargeObservableCollection<double> collection = [];
         SharedObservableTests.EventTracker tracker = SharedObservableTests.AttachEventTracker(collection);
 
         double[] sourceArray = [1.1, 2.2, 3.3];
@@ -732,7 +732,7 @@ public class LargeObservableCollectionTest
         await Assert.That(collection[0]).IsEqualTo(100);
         await Assert.That(collection[1]).IsEqualTo(200);
 
-#if NETSTANDARD2_1_OR_GREATER
+#if NETSTANDARD2_1_OR_GREATER || NETCOREAPP3_0_OR_GREATER || NET5_0_OR_GREATER
         // Test CopyFromSpan
         tracker.Clear();
         ReadOnlySpan<int> spanSource = [500, 600];
@@ -767,10 +767,10 @@ public class LargeObservableCollectionTest
         await Assert.That(arrayTarget[1]).IsEqualTo(20);
         await Assert.That(arrayTarget[2]).IsEqualTo(30);
 
-#if NETSTANDARD2_1_OR_GREATER
+#if NETSTANDARD2_1_OR_GREATER || NETCOREAPP3_0_OR_GREATER || NET5_0_OR_GREATER
         // Test CopyToSpan
-        Span<int> spanTarget = new int[3];
-        collection.CopyToSpan(spanTarget, 2, 3);
+        int[] spanTarget = new int[3];
+        collection.CopyToSpan(spanTarget.AsSpan(), 2, 3);
         
         await Assert.That(spanTarget[0]).IsEqualTo(30);
         await Assert.That(spanTarget[1]).IsEqualTo(40);
@@ -920,7 +920,7 @@ public class LargeObservableCollectionTest
         LargeObservableCollection<int> collection2 = new(items, suppressEventExceptions: true);
         await Assert.That(collection2.Count).IsEqualTo(3L);
 
-#if NETSTANDARD2_1_OR_GREATER
+#if NETSTANDARD2_1_OR_GREATER || NETCOREAPP3_0_OR_GREATER || NET5_0_OR_GREATER
         // Constructor with ReadOnlySpan and suppressEventExceptions
         ReadOnlySpan<int> span = items.AsSpan();
         LargeObservableCollection<int> collection3 = new(span, suppressEventExceptions: true);
@@ -1367,7 +1367,7 @@ public class LargeObservableCollectionTest
         await SharedObservableTests.VerifyCollectionChangedEventFires(tracker, 1, NotifyCollectionChangedAction.Replace);
     }
 
-#if NETSTANDARD2_1_OR_GREATER
+#if NETSTANDARD2_1_OR_GREATER || NETCOREAPP3_0_OR_GREATER || NET5_0_OR_GREATER
     [Test]
     public async Task CopyFromSpan_SingleItem_FiresReplaceEvent()
     {

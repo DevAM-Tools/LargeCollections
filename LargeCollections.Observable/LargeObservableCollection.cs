@@ -75,7 +75,7 @@ public class LargeObservableCollection<T> : ILargeObservableCollection<T>
         AddRange(items);
     }
 
-#if NETSTANDARD2_1_OR_GREATER
+#if NETSTANDARD2_1_OR_GREATER || NETCOREAPP3_0_OR_GREATER || NET5_0_OR_GREATER
     public LargeObservableCollection(ReadOnlySpan<T> span) : this(span, suppressEventExceptions: false)
     {
     }
@@ -323,7 +323,7 @@ public class LargeObservableCollection<T> : ILargeObservableCollection<T>
         }
     }
 
-#if NETSTANDARD2_1_OR_GREATER
+#if NETSTANDARD2_1_OR_GREATER || NETCOREAPP3_0_OR_GREATER || NET5_0_OR_GREATER
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void AddRange(ReadOnlySpan<T> source)
     {
@@ -529,7 +529,7 @@ public class LargeObservableCollection<T> : ILargeObservableCollection<T>
         }
     }
 
-#if NETSTANDARD2_1_OR_GREATER
+#if NETSTANDARD2_1_OR_GREATER || NETCOREAPP3_0_OR_GREATER || NET5_0_OR_GREATER
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void CopyFromSpan(ReadOnlySpan<T> source, long targetOffset, int count)
     {
@@ -574,7 +574,7 @@ public class LargeObservableCollection<T> : ILargeObservableCollection<T>
     public void CopyToArray(T[] target, long sourceOffset, int targetOffset, int count)
         => _List.CopyToArray(target, sourceOffset, targetOffset, count);
 
-#if NETSTANDARD2_1_OR_GREATER
+#if NETSTANDARD2_1_OR_GREATER || NETCOREAPP3_0_OR_GREATER || NET5_0_OR_GREATER
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void CopyToSpan(Span<T> target, long sourceOffset, int count)
         => _List.CopyToSpan(target, sourceOffset, count);

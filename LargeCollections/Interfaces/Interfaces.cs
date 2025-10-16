@@ -79,7 +79,7 @@ public interface ILargeCollection<T> : IReadOnlyLargeCollection<T>
     /// <param name="items">An enumeration of items that shall be added to the collection.</param>
     void AddRange(IEnumerable<T> items);
 
-#if NETSTANDARD2_1_OR_GREATER
+#if NETSTANDARD2_1_OR_GREATER || NETCOREAPP3_0_OR_GREATER || NET5_0_OR_GREATER
     /// <summary>
     /// Adds multiple <paramref name="items"/> to the collection.
     /// Depending on the actual collection implementation exisitng items may be replaced.
@@ -204,7 +204,7 @@ public interface IReadOnlyLargeArray<T> : IReadOnlyLargeCollection<T>
     /// <param name="count">The number of items that will be copied.</param>
     void CopyToArray(T[] target, long sourceOffset, int targetOffset, int count);
 
-# if NETSTANDARD2_1_OR_GREATER
+# if NETSTANDARD2_1_OR_GREATER || NETCOREAPP3_0_OR_GREATER || NET5_0_OR_GREATER
     /// <summary>
     /// Copies <paramref name="count"/> items to the <paramref name="target"/> from this collection at <paramref name="sourceOffset"/>.
     /// </summary>
@@ -270,7 +270,7 @@ public interface ILargeArray<T> : IReadOnlyLargeArray<T>
     /// <param name="count">The number of items that will be copied.</param>
     void CopyFromArray(T[] source, int sourceOffset, long targetOffset, int count);
 
-#if NETSTANDARD2_1_OR_GREATER
+#if NETSTANDARD2_1_OR_GREATER || NETCOREAPP3_0_OR_GREATER || NET5_0_OR_GREATER
     /// <summary>
     /// Copies <paramref name="count"/> items from the <paramref name="source"/> to this collection at <paramref name="targetOffset"/>.
     /// </summary>

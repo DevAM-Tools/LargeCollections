@@ -201,7 +201,7 @@ public class LargeSet<T> : ILargeCollection<T>
         AddRange(items);
     }
 
-#if NETSTANDARD2_1_OR_GREATER
+#if NETSTANDARD2_1_OR_GREATER || NETCOREAPP3_0_OR_GREATER || NET5_0_OR_GREATER
     public LargeSet(ReadOnlySpan<T> items,
         Func<T, T, bool> equalsFunction = null,
         Func<T, int> hashCodeFunction = null,
@@ -305,7 +305,7 @@ public class LargeSet<T> : ILargeCollection<T>
         }
     }
 
-#if NETSTANDARD2_1_OR_GREATER
+#if NETSTANDARD2_1_OR_GREATER || NETCOREAPP3_0_OR_GREATER || NET5_0_OR_GREATER
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public virtual void AddRange(ReadOnlySpan<T> items)
     {
