@@ -15,10 +15,12 @@
 		<PackageProjectUrl>https://github.com/DevAM-Tools/LargeCollections</PackageProjectUrl>
 		<RepositoryUrl>https://github.com/DevAM-Tools/LargeCollections</RepositoryUrl>
 		<PackageReadmeFile>README.md</PackageReadmeFile>
-		<Version>5.0.1</Version>
-		<AssemblyVersion>5.0.1</AssemblyVersion>
-		<FileVersion>5.0.1</FileVersion>
+		<Version>5.0.2</Version>
+		<AssemblyVersion>5.0.2</AssemblyVersion>
+		<FileVersion>5.0.2</FileVersion>
 		<SignAssembly>False</SignAssembly>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)' == 'Release'">
 		<ContinuousIntegrationBuild>true</ContinuousIntegrationBuild>
   </PropertyGroup>
 </Project>

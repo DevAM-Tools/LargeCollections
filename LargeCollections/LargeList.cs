@@ -835,7 +835,7 @@ public class LargeList<T> : IRefAccessLargeList<T>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private void Resize(long capacity)
     {
-        _Storage.StorageResize(capacity);
+        StorageExtensions.StorageResize(ref _Storage, capacity);
         Capacity = capacity;
     }
 }

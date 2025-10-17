@@ -453,15 +453,15 @@ public static class StorageExtensions
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal static void StorageCopyToArray<T>(this T[][] source, T[] target, long sourceOffset, int targetOffset, int count)
     {
-        long currentCount = 0L;
-        long currentTargetItemIndex = targetOffset;
+        int currentCount = 0;
+        int currentTargetItemIndex = targetOffset;
 
         while (currentCount < count)
         {
             (int currentSourceStorageIndex, int currentSourceItemIndex) = StorageGetIndex(sourceOffset + currentCount);
             T[] currentSourceArray = source[currentSourceStorageIndex];
 
-            long elementsToCopyCount = Math.Min(currentSourceArray.Length - currentSourceItemIndex, target.Length - currentTargetItemIndex);
+            int elementsToCopyCount = Math.Min(currentSourceArray.Length - currentSourceItemIndex, target.Length - currentTargetItemIndex);
             elementsToCopyCount = Math.Min(elementsToCopyCount, count - currentCount);
 
             if (elementsToCopyCount <= 0)
@@ -480,15 +480,15 @@ public static class StorageExtensions
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal static void StorageCopyToSpan<T>(this T[][] source, Span<T> target, long sourceOffset, int count)
     {
-        long currentCount = 0L;
-        long currentTargetItemIndex = 0L;
+        int currentCount = 0;
+        int currentTargetItemIndex = 0;
 
         while (currentCount < count)
         {
             (int currentSourceStorageIndex, int currentSourceItemIndex) = StorageGetIndex(sourceOffset + currentCount);
             T[] currentSourceArray = source[currentSourceStorageIndex];
 
-            long elementsToCopyCount = Math.Min(currentSourceArray.Length - currentSourceItemIndex, target.Length - currentTargetItemIndex);
+            int elementsToCopyCount = Math.Min(currentSourceArray.Length - currentSourceItemIndex, target.Length - currentTargetItemIndex);
             elementsToCopyCount = Math.Min(elementsToCopyCount, count - currentCount);
 
             if (elementsToCopyCount <= 0)
@@ -496,8 +496,8 @@ public static class StorageExtensions
                 throw new ArgumentException("No elements to copy. Check source and target arrays and their offsets/counts.");
             }
 
-            ReadOnlySpan<T> sourceSpan = currentSourceArray.AsSpan(currentSourceItemIndex, (int)elementsToCopyCount);
-            Span<T> targetSpan = target.Slice((int)currentTargetItemIndex, (int)elementsToCopyCount);
+            ReadOnlySpan<T> sourceSpan = currentSourceArray.AsSpan(currentSourceItemIndex, elementsToCopyCount);
+            Span<T> targetSpan = target.Slice(currentTargetItemIndex, elementsToCopyCount);
             sourceSpan.CopyTo(targetSpan);
 
             currentCount += elementsToCopyCount;
@@ -516,15 +516,15 @@ public static class StorageExtensions
     internal static void StorageCopyFromArray<T>(this T[][] target, T[] source, int sourceOffset, long targetOffset, int count)
     {
         long currentCount = 0L;
-        long currentSourceItemIndex = sourceOffset;
+        int currentSourceItemIndex = sourceOffset;
 
         while (currentCount < count)
         {
             (int currentTargetStorageIndex, int currentTargetItemIndex) = StorageGetIndex(targetOffset + currentCount);
             T[] currentTargetArray = target[currentTargetStorageIndex];
 
-            long elementsToCopyCount = Math.Min(currentTargetArray.Length - currentTargetItemIndex, source.Length - currentSourceItemIndex);
-            elementsToCopyCount = Math.Min(elementsToCopyCount, count - currentCount);
+            int elementsToCopyCount = Math.Min(currentTargetArray.Length - currentTargetItemIndex, source.Length - currentSourceItemIndex);
+            elementsToCopyCount = Math.Min(elementsToCopyCount, count - (int)currentCount);
 
             if (elementsToCopyCount <= 0)
             {
@@ -543,23 +543,23 @@ public static class StorageExtensions
     internal static void StorageCopyFromSpan<T>(this T[][] target, ReadOnlySpan<T> source, long targetOffset, int count)
     {
         long currentCount = 0L;
-        long currentSourceItemIndex = 0L;
+        int currentSourceItemIndex = 0;
 
         while (currentCount < count)
         {
             (int currentTargetStorageIndex, int currentTargetItemIndex) = StorageGetIndex(targetOffset + currentCount);
             T[] currentTargetArray = target[currentTargetStorageIndex];
 
-            long elementsToCopyCount = Math.Min(currentTargetArray.Length - currentTargetItemIndex, source.Length - currentSourceItemIndex);
-            elementsToCopyCount = Math.Min(elementsToCopyCount, count - currentCount);
+            int elementsToCopyCount = Math.Min(currentTargetArray.Length - currentTargetItemIndex, source.Length - currentSourceItemIndex);
+            elementsToCopyCount = Math.Min(elementsToCopyCount, count - (int)currentCount);
 
             if (elementsToCopyCount <= 0)
             {
                 throw new ArgumentException("No elements to copy. Check source and target arrays and their offsets/counts.");
             }
 
-            ReadOnlySpan<T> sourceSpan = source.Slice((int)currentSourceItemIndex, (int)elementsToCopyCount);
-            Span<T> targetSpan = currentTargetArray.AsSpan((int)currentTargetItemIndex, (int)elementsToCopyCount);
+            ReadOnlySpan<T> sourceSpan = source.Slice(currentSourceItemIndex, elementsToCopyCount);
+            Span<T> targetSpan = currentTargetArray.AsSpan(currentTargetItemIndex, elementsToCopyCount);
             sourceSpan.CopyTo(targetSpan);
 
             currentCount += elementsToCopyCount;
@@ -611,7 +611,7 @@ public static class StorageExtensions
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    internal static void StorageResize<T>(this T[][] array, long capacity)
+    internal static void StorageResize<T>(ref T[][] array, long capacity)
     {
         if (capacity < 0L || capacity > Constants.MaxLargeCollectionCount)
         {
@@ -628,6 +628,10 @@ public static class StorageExtensions
             if (array[i] == null)
             {
                 array[i] = new T[Constants.MaxStorageCapacity];
+            }
+            else if (array[i].Length < Constants.MaxStorageCapacity)
+            {
+                Array.Resize(ref array[i], (int)Constants.MaxStorageCapacity);
             }
         }
 

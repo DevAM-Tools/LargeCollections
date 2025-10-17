@@ -67,7 +67,7 @@ namespace LargeCollections
             {
                 return;
             }
-            _Storage.StorageResize(capacity);
+            StorageExtensions.StorageResize(ref _Storage, capacity);
             Count = capacity;
         }
 
