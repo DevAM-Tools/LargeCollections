@@ -24,8 +24,12 @@ SOFTWARE.
 */
 
 using Microsoft.Data.Sqlite;
+using System;
 using System.Collections;
+using System.Collections.Generic;
 using System.Diagnostics;
+using System.IO;
+using System.Linq;
 using System.Runtime.CompilerServices;
 
 namespace LargeCollections.DiskCache;
@@ -676,6 +680,20 @@ public class DiskCache<TKey, TValue> : IDiskCache<TKey, TValue>, IDisposable whe
 
         foreach (KeyValuePair<TKey, TValue> item in items)
         {
+            Set(item.Key, item.Value);
+        }
+    }
+
+    public void AddRange(ReadOnlyLargeSpan<KeyValuePair<TKey, TValue>> items)
+    {
+        if (IsReadOnly)
+        {
+            throw new InvalidOperationException("Modifications are not allowed when opened in read only mode.");
+        }
+
+        for (long i = 0L; i < items.Count; i++)
+        {
+            KeyValuePair<TKey, TValue> item = items[i];
             Set(item.Key, item.Value);
         }
     }

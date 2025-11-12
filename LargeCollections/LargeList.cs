@@ -23,9 +23,12 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
 
+using System;
 using System.Collections;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 
 namespace LargeCollections;
 
@@ -121,32 +124,6 @@ public class LargeList<T> : IRefAccessLargeList<T>
         MinLoadFactor = minLoadFactor;
     }
 
-    public LargeList(IEnumerable<T> items,
-        long capacity = 1L,
-        double capacityGrowFactor = Constants.DefaultCapacityGrowFactor,
-        long fixedCapacityGrowAmount = Constants.DefaultFixedCapacityGrowAmount,
-        long fixedCapacityGrowLimit = Constants.DefaultFixedCapacityGrowLimit,
-        double minLoadFactor = Constants.DefaultMinLoadFactor)
-
-        : this(capacity, capacityGrowFactor, fixedCapacityGrowAmount, fixedCapacityGrowLimit, minLoadFactor)
-    {
-        AddRange(items);
-    }
-
-#if NETSTANDARD2_1_OR_GREATER || NETCOREAPP3_0_OR_GREATER || NET5_0_OR_GREATER
-    public LargeList(ReadOnlySpan<T> items,
-            long capacity = 1L,
-            double capacityGrowFactor = Constants.DefaultCapacityGrowFactor,
-            long fixedCapacityGrowAmount = Constants.DefaultFixedCapacityGrowAmount,
-            long fixedCapacityGrowLimit = Constants.DefaultFixedCapacityGrowLimit,
-            double minLoadFactor = Constants.DefaultMinLoadFactor)
-
-            : this(capacity, capacityGrowFactor, fixedCapacityGrowAmount, fixedCapacityGrowLimit, minLoadFactor)
-    {
-        AddRange(items);
-    }
-#endif
-
     public T this[long index]
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -196,15 +173,9 @@ public class LargeList<T> : IRefAccessLargeList<T>
         {
             throw new ArgumentNullException(nameof(items));
         }
-        if (items is IReadOnlyLargeArray<T> largeArray)
-        {
-            AddRange(largeArray, 0, largeArray.Count);
-        }
-        else if (items is T[] array)
-        {
-            AddRange(array, 0, array.Length);
-        }
-        else if (items is IReadOnlyList<T> list)
+
+#if NET5_0_OR_GREATER
+        if (items is List<T> list)
         {
             if (list.Count == 0)
             {
@@ -218,11 +189,31 @@ public class LargeList<T> : IRefAccessLargeList<T>
 
             EnsureRemainingCapacity(list.Count);
 
-            for (int i = 0; i < list.Count; i++)
-            {
-                _Storage.StorageSet(Count + i, list[i]);
-            }
+            Span<T> span = CollectionsMarshal.AsSpan(list);
+            _Storage.StorageCopyFromSpan(span, Count, list.Count);
             Count += list.Count;
+        }
+        else
+#endif
+        if (items is IReadOnlyList<T> readOnlyList)
+        {
+            if (readOnlyList.Count == 0)
+            {
+                return;
+            }
+
+            if (Count + readOnlyList.Count >= Constants.MaxLargeCollectionCount)
+            {
+                throw new InvalidOperationException($"Can not store more than {Constants.MaxLargeCollectionCount} items.");
+            }
+
+            EnsureRemainingCapacity(readOnlyList.Count);
+
+            for (int i = 0; i < readOnlyList.Count; i++)
+            {
+                _Storage.StorageSet(Count + i, readOnlyList[i]);
+            }
+            Count += readOnlyList.Count;
         }
         else
         {
@@ -233,24 +224,55 @@ public class LargeList<T> : IRefAccessLargeList<T>
         }
     }
 
+    /// <summary>
+    /// Adds a range of items from a large array.
+    /// </summary>
+    /// <param name="source">The source large array.</param>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public void AddRange(IReadOnlyLargeArray<T> source, long offset, long count)
+    public void AddRange(IReadOnlyLargeArray<T> source)
     {
         if (source is null)
         {
             throw new ArgumentNullException(nameof(source));
         }
 
-        if (Count + count >= Constants.MaxLargeCollectionCount)
+        AddRange(source, 0L, source.Count);
+    }
+
+    /// <summary>
+    /// Adds a range of items from a large array.
+    /// </summary>
+    /// <param name="source">The source large array.</param>
+    /// <param name="offset">The offset in the source array to start adding from.</param>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public void AddRange(IReadOnlyLargeArray<T> source, long offset)
+    {
+        if (source is null)
         {
-            throw new InvalidOperationException($"Can not store more than {Constants.MaxLargeCollectionCount} items.");
+            throw new ArgumentNullException(nameof(source));
+        }
+
+        AddRange(source, offset, source.Count - offset);
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public void AddRange(IReadOnlyLargeArray<T> source, long offset, long count)
+    {
+        if (count == 0L)
+        {
+            return;
+        }
+
+        if (source is null)
+        {
+            throw new ArgumentNullException(nameof(source));
         }
 
         StorageExtensions.CheckRange(offset, count, source.Count);
 
-        if (count == 0L)
+        if (Count + count >= Constants.MaxLargeCollectionCount)
         {
-            return;
+            throw new InvalidOperationException($"Can not store more than {Constants.MaxLargeCollectionCount} items.");
         }
 
         EnsureRemainingCapacity(count);
@@ -278,6 +300,47 @@ public class LargeList<T> : IRefAccessLargeList<T>
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public void AddRange(ReadOnlyLargeSpan<T> source)
+    {
+        if (source.Count == 0L)
+        {
+            return;
+        }
+
+        if (Count + source.Count >= Constants.MaxLargeCollectionCount)
+        {
+            throw new InvalidOperationException($"Can not store more than {Constants.MaxLargeCollectionCount} items.");
+        }
+
+        EnsureRemainingCapacity(source.Count);
+
+        if (source.Inner is LargeArray<T> largeArraySource)
+        {
+            T[][] sourceStorage = largeArraySource.GetStorage();
+            _Storage.StorageCopyFrom(sourceStorage, source.Start, Count, source.Count);
+        }
+        else if (source.Inner is LargeList<T> largeListSource)
+        {
+            T[][] sourceStorage = largeListSource.GetStorage();
+            _Storage.StorageCopyFrom(sourceStorage, source.Start, Count, source.Count);
+        }
+        else
+        {
+            for (long i = 0L; i < source.Count; i++)
+            {
+                T item = source[i];
+                _Storage.StorageSet(Count + i, item);
+            }
+        }
+
+        Count += source.Count;
+    }
+
+    /// <summary>
+    /// Adds a range of items from a standard array.
+    /// </summary>
+    /// <param name="source">The source array.</param>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void AddRange(T[] source)
     {
         if (source is null)
@@ -288,9 +351,36 @@ public class LargeList<T> : IRefAccessLargeList<T>
         AddRange(source, 0, source.Length);
     }
 
+    /// <summary>
+    /// Adds a range of items from a standard array.
+    /// </summary>
+    /// <param name="source">The source array.</param>  
+    /// <param name="offset">The offset in the source array to start from.</param>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public void AddRange(T[] source, int offset)
+    {
+        if (source is null)
+        {
+            throw new ArgumentNullException(nameof(source));
+        }
+
+        AddRange(source, offset, source.Length - offset);
+    }
+
+    /// <summary>
+    /// Adds a range of items from a standard array.
+    /// </summary>
+    /// <param name="source">The source array.</param>
+    /// <param name="offset">The offset in the source array to start from.</param>
+    /// <param name="count">The number of items to add.</param>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void AddRange(T[] source, int offset, int count)
     {
+        if (count == 0)
+        {
+            return;
+        }
+
         if (source is null)
         {
             throw new ArgumentNullException(nameof(source));
@@ -340,13 +430,18 @@ public class LargeList<T> : IRefAccessLargeList<T>
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public bool Contains(T item)
-    {
-        bool result = _Storage.Contains(item, 0L, Count, LargeSet<T>.DefaultEqualsFunction);
-        return result;
-    }
+        => Contains(item, 0L, Count, null);
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public bool Contains(T item, Func<T, T, bool> equalsFunction)
+        => Contains(item, 0L, Count, equalsFunction);
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public bool Contains(T item, long offset, long count)
+        => Contains(item, offset, count, null);
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public bool Contains(T item, long offset, long count, Func<T, T, bool> equalsFunction)
     {
         StorageExtensions.CheckRange(offset, count, Count);
 
@@ -355,7 +450,9 @@ public class LargeList<T> : IRefAccessLargeList<T>
             return false;
         }
 
-        bool result = _Storage.Contains(item, offset, count, LargeSet<T>.DefaultEqualsFunction);
+        equalsFunction ??= LargeSet<T>.DefaultEqualsFunction;
+
+        bool result = _Storage.Contains(item, offset, count, equalsFunction);
         return result;
     }
 
@@ -363,17 +460,17 @@ public class LargeList<T> : IRefAccessLargeList<T>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void CopyFrom(IReadOnlyLargeArray<T> source, long sourceOffset, long targetOffset, long count)
     {
+        if (count == 0L)
+        {
+            return;
+        }
+
         if (source is null)
         {
             throw new ArgumentNullException(nameof(source));
         }
         StorageExtensions.CheckRange(sourceOffset, count, source.Count);
         StorageExtensions.CheckRange(targetOffset, count, Count);
-
-        if (count == 0L)
-        {
-            return;
-        }
 
         if (source is LargeArray<T> largeArraySource)
         {
@@ -396,8 +493,44 @@ public class LargeList<T> : IRefAccessLargeList<T>
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public void CopyFrom(ReadOnlyLargeSpan<T> source, long targetOffset, long count)
+    {
+        if (count == 0L)
+        {
+            return;
+        }
+
+        StorageExtensions.CheckRange(0L, count, source.Count);
+        StorageExtensions.CheckRange(targetOffset, count, Count);
+
+        if (source.Inner is LargeArray<T> largeArraySource)
+        {
+            T[][] sourceStorage = largeArraySource.GetStorage();
+            _Storage.StorageCopyFrom(sourceStorage, source.Start, targetOffset, count);
+        }
+        else if (source.Inner is LargeList<T> largeListSource)
+        {
+            T[][] sourceStorage = largeListSource.GetStorage();
+            _Storage.StorageCopyFrom(sourceStorage, source.Start, targetOffset, count);
+        }
+        else
+        {
+            for (long i = 0L; i < count; i++)
+            {
+                T item = source[i];
+                _Storage.StorageSet(targetOffset + i, item);
+            }
+        }
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void CopyFromArray(T[] source, int sourceOffset, long targetOffset, int count)
     {
+        if (count == 0L)
+        {
+            return;
+        }
+
         if (source is null)
         {
             throw new ArgumentNullException(nameof(source));
@@ -406,24 +539,20 @@ public class LargeList<T> : IRefAccessLargeList<T>
         StorageExtensions.CheckRange(sourceOffset, count, source.Length);
         StorageExtensions.CheckRange(targetOffset, count, Count);
 
-        if (count == 0L)
-        {
-            return;
-        }
-
         _Storage.StorageCopyFromArray(source, sourceOffset, targetOffset, count);
     }
+
 #if NETSTANDARD2_1_OR_GREATER || NETCOREAPP3_0_OR_GREATER || NET5_0_OR_GREATER
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void CopyFromSpan(ReadOnlySpan<T> source, long targetOffset, int count)
     {
-        StorageExtensions.CheckRange(0, count, source.Length);
-        StorageExtensions.CheckRange(targetOffset, count, Count);
-
         if (count == 0L)
         {
             return;
         }
+
+        StorageExtensions.CheckRange(0, count, source.Length);
+        StorageExtensions.CheckRange(targetOffset, count, Count);
 
         _Storage.StorageCopyFromSpan(source, targetOffset, count);
     }
@@ -432,6 +561,11 @@ public class LargeList<T> : IRefAccessLargeList<T>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void CopyTo(ILargeArray<T> target, long sourceOffset, long targetOffset, long count)
     {
+        if (count == 0L)
+        {
+            return;
+        }
+
         if (target is null)
         {
             throw new ArgumentNullException(nameof(target));
@@ -439,11 +573,6 @@ public class LargeList<T> : IRefAccessLargeList<T>
 
         StorageExtensions.CheckRange(targetOffset, count, target.Count);
         StorageExtensions.CheckRange(sourceOffset, count, Count);
-
-        if (count == 0L)
-        {
-            return;
-        }
 
         if (target is LargeArray<T> largeArrayTarget)
         {
@@ -466,8 +595,44 @@ public class LargeList<T> : IRefAccessLargeList<T>
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public void CopyTo(LargeSpan<T> target, long sourceOffset, long count)
+    {
+        if (count == 0L)
+        {
+            return;
+        }
+
+        StorageExtensions.CheckRange(0L, count, target.Count);
+        StorageExtensions.CheckRange(sourceOffset, count, Count);
+
+        if (target.Inner is LargeArray<T> largeArrayTarget)
+        {
+            T[][] targetStorage = largeArrayTarget.GetStorage();
+            _Storage.StorageCopyTo(targetStorage, sourceOffset, target.Start, count);
+        }
+        else if (target.Inner is LargeList<T> largeListTarget)
+        {
+            T[][] targetStorage = largeListTarget.GetStorage();
+            _Storage.StorageCopyTo(targetStorage, sourceOffset, target.Start, count);
+        }
+        else
+        {
+            for (long i = 0L; i < count; i++)
+            {
+                T item = _Storage.StorageGet(sourceOffset + i);
+                target[i] = item;
+            }
+        }
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void CopyToArray(T[] target, long sourceOffset, int targetOffset, int count)
     {
+        if (count == 0L)
+        {
+            return;
+        }
+
         if (target is null)
         {
             throw new ArgumentNullException(nameof(target));
@@ -475,11 +640,6 @@ public class LargeList<T> : IRefAccessLargeList<T>
 
         StorageExtensions.CheckRange(targetOffset, count, target.Length);
         StorageExtensions.CheckRange(sourceOffset, count, Count);
-
-        if (count == 0L)
-        {
-            return;
-        }
 
         _Storage.StorageCopyToArray(target, sourceOffset, targetOffset, count);
     }
@@ -489,13 +649,13 @@ public class LargeList<T> : IRefAccessLargeList<T>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void CopyToSpan(Span<T> target, long sourceOffset, int count)
     {
-        StorageExtensions.CheckRange(0, count, target.Length);
-        StorageExtensions.CheckRange(sourceOffset, count, Count);
-
         if (count == 0L)
         {
             return;
         }
+
+        StorageExtensions.CheckRange(0, count, target.Length);
+        StorageExtensions.CheckRange(sourceOffset, count, Count);
 
         _Storage.StorageCopyToSpan(target, sourceOffset, count);
     }
@@ -514,8 +674,7 @@ public class LargeList<T> : IRefAccessLargeList<T>
     public ref T GetRef(long index)
     {
         StorageExtensions.CheckIndex(index, Count);
-        ref T result = ref _Storage.StorageGetRef(index);
-        return ref result;
+        return ref _Storage.StorageGetRef(index);
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -540,33 +699,47 @@ public class LargeList<T> : IRefAccessLargeList<T>
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public bool Remove(T item)
-        => Remove(item, true, out _);
-
+        => Remove(item, true, out _, null);
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public bool Remove(T item, bool preserveOrder)
-        => Remove(item, preserveOrder, out _);
+        => Remove(item, preserveOrder, out _, null);
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public bool Remove(T item, out T removedItem)
-        => Remove(item, true, out removedItem);
+        => Remove(item, true, out removedItem, null);
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public bool Remove(T item, bool preserveOrder, out T removedItem)
+        => Remove(item, preserveOrder, out removedItem, null);
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public bool Remove(T item, Func<T, T, bool> equalsFunction)
+        => Remove(item, true, out _, equalsFunction);
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public bool Remove(T item, bool preserveOrder, Func<T, T, bool> equalsFunction)
+        => Remove(item, preserveOrder, out _, equalsFunction);
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public bool Remove(T item, out T removedItem, Func<T, T, bool> equalsFunction)
+        => Remove(item, true, out removedItem, equalsFunction);
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public bool Remove(T item, bool preserveOrder, out T removedItem, Func<T, T, bool> equalsFunction)
     {
         removedItem = default;
 
-        for (long i = 0L; i < Count; i++)
+        equalsFunction ??= LargeSet<T>.DefaultEqualsFunction;
+
+        long index = _Storage.StorageIndexOf(item, 0L, Count, equalsFunction);
+
+        if (index < 0L)
         {
-            T currentItem = _Storage.StorageGet(i);
-            if (LargeSet<T>.DefaultEqualsFunction(item, currentItem))
-            {
-                removedItem = currentItem;
-                RemoveAt(i, preserveOrder);
-                return true;
-            }
+            return false;
         }
 
-        return false;
+        removedItem = RemoveAt(index, preserveOrder);
+        return true;
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -813,9 +986,17 @@ public class LargeList<T> : IRefAccessLargeList<T>
             newCapacity = StorageExtensions.GetGrownCapacity(newCapacity, CapacityGrowFactor, FixedCapacityGrowAmount, FixedCapacityGrowLimit);
         }
 
+        // Cap to maximum allowed capacity
         if (newCapacity > Constants.MaxLargeCollectionCount)
         {
             newCapacity = Constants.MaxLargeCollectionCount;
+
+            // If the target capacity is still not met after capping, throw an exception
+            if (newCapacity < targetCapacity)
+            {
+                throw new InvalidOperationException(
+                    $"Cannot grow collection to {targetCapacity} elements. Maximum allowed capacity is {Constants.MaxLargeCollectionCount}.");
+            }
         }
 
         Resize(newCapacity);
@@ -824,7 +1005,7 @@ public class LargeList<T> : IRefAccessLargeList<T>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void EnsureRemainingCapacity(long capacity)
     {
-        if(capacity < 0L || capacity > Constants.MaxLargeCollectionCount)
+        if (capacity < 0L || capacity > Constants.MaxLargeCollectionCount)
         {
             throw new ArgumentOutOfRangeException(nameof(capacity));
         }
@@ -837,5 +1018,47 @@ public class LargeList<T> : IRefAccessLargeList<T>
     {
         StorageExtensions.StorageResize(ref _Storage, capacity);
         Capacity = capacity;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public long IndexOf(T item)
+        => IndexOf(item, 0L, Count, null);
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public long IndexOf(T item, Func<T, T, bool> equalsFunction)
+        => IndexOf(item, 0L, Count, equalsFunction);
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public long IndexOf(T item, long offset, long count)
+        => IndexOf(item, offset, count, null);
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public long IndexOf(T item, long offset, long count, Func<T, T, bool> equalsFunction)
+    {
+        StorageExtensions.CheckRange(offset, count, Count);
+        equalsFunction ??= LargeSet<T>.DefaultEqualsFunction;
+        long result = _Storage.StorageIndexOf(item, offset, count, equalsFunction);
+        return result;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public long LastIndexOf(T item)
+        => LastIndexOf(item, 0L, Count, null);
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public long LastIndexOf(T item, Func<T, T, bool> equalsFunction)
+        => LastIndexOf(item, 0L, Count, equalsFunction);
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public long LastIndexOf(T item, long offset, long count)
+        => LastIndexOf(item, offset, count, null);
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public long LastIndexOf(T item, long offset, long count, Func<T, T, bool> equalsFunction)
+    {
+        StorageExtensions.CheckRange(offset, count, Count);
+        equalsFunction ??= LargeSet<T>.DefaultEqualsFunction;
+        long result = _Storage.StorageLastIndexOf(item, offset, count, equalsFunction);
+        return result;
     }
 }

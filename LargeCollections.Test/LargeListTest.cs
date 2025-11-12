@@ -23,759 +23,1157 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
 
+using System;
+using System.Collections;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading.Tasks;
+using LargeCollections.Test.Helpers;
+using TUnit.Core;
+
 namespace LargeCollections.Test;
 
 public class LargeListTest
 {
+    public static IEnumerable<long> Capacities() => Parameters.Capacities;
+
+    private const long MarkerBase = 10_000L;
+
+    #region Constructor / Properties
     [Test]
-    [MethodDataSource(typeof(LargeArrayTest), nameof(LargeArrayTest.CapacitiesTestCasesArguments))]
-    public async Task Create(long capacity)
+    [MethodDataSource(nameof(Capacities))]
+    public async Task Constructor_SetsDefaults(long capacity)
     {
-        LargeList<long> largeList;
-        if (capacity < 0 || capacity > Constants.MaxLargeCollectionCount)
-        {
-            await Assert.That(() => largeList = new LargeList<long>(capacity)).Throws<ArgumentOutOfRangeException>();
-            return;
-        }
+        LargeList<long> list = new(capacity);
 
-        // Test 1: Constructor with capacity
-        largeList = new LargeList<long>(capacity);
-        await Assert.That(largeList.Count).IsEqualTo(0L);
-        await Assert.That(largeList.Capacity).IsEqualTo(capacity);
-
-        // Test 2: Default constructor
-        LargeList<long> defaultList = [];
-        await Assert.That(defaultList.Count).IsEqualTo(0L);
-        await Assert.That(defaultList.Capacity).IsGreaterThanOrEqualTo(0L);
-
-        // Test 3: Constructor with collection
-        if (capacity <= int.MaxValue)
-        {
-            long[] sourceArray = new long[capacity];
-            LargeList<long> listFromArray = new(sourceArray);
-            await Assert.That(listFromArray.Count).IsEqualTo(capacity);
-            await Assert.That(listFromArray.Capacity).IsGreaterThanOrEqualTo(capacity);
-        }
-
-        // Test 4: Null collection throws exception
-        await Assert.That(() => new LargeList<long>((IEnumerable<long>)null)).Throws<ArgumentNullException>();
-        _ = new LargeList<long>((ReadOnlySpan<long>)null);
+        await Assert.That(list.Count).IsEqualTo(0L);
+        await Assert.That(list.Capacity).IsEqualTo(capacity);
+        await Assert.That(list.CapacityGrowFactor).IsEqualTo(Constants.DefaultCapacityGrowFactor);
+        await Assert.That(list.FixedCapacityGrowAmount).IsEqualTo(Constants.DefaultFixedCapacityGrowAmount);
+        await Assert.That(list.FixedCapacityGrowLimit).IsEqualTo(Constants.DefaultFixedCapacityGrowLimit);
+        await Assert.That(list.MinLoadFactor).IsEqualTo(Constants.DefaultMinLoadFactor);
     }
 
     [Test]
-    [MethodDataSource(typeof(LargeArrayTest), nameof(LargeArrayTest.CapacitiesTestCasesArguments))]
-    public async Task AddAndAddRange(long capacity)
+    public async Task Constructor_ThrowsOnInvalidParameters()
     {
-        if (capacity < 0L || capacity > Constants.MaxLargeCollectionCount)
+        await Assert.That(() => new LargeList<int>(1, 1.0, Constants.DefaultFixedCapacityGrowAmount, Constants.DefaultFixedCapacityGrowLimit, Constants.DefaultMinLoadFactor)).Throws<Exception>();
+        await Assert.That(() => new LargeList<int>(1, Constants.MaxCapacityGrowFactor + 0.1, Constants.DefaultFixedCapacityGrowAmount, Constants.DefaultFixedCapacityGrowLimit, Constants.DefaultMinLoadFactor)).Throws<Exception>();
+        await Assert.That(() => new LargeList<int>(1, Constants.DefaultCapacityGrowFactor, 0, Constants.DefaultFixedCapacityGrowLimit, Constants.DefaultMinLoadFactor)).Throws<Exception>();
+        await Assert.That(() => new LargeList<int>(1, Constants.DefaultCapacityGrowFactor, Constants.DefaultFixedCapacityGrowAmount, 0, Constants.DefaultMinLoadFactor)).Throws<Exception>();
+        await Assert.That(() => new LargeList<int>(1, Constants.DefaultCapacityGrowFactor, Constants.DefaultFixedCapacityGrowAmount, Constants.DefaultFixedCapacityGrowLimit, -0.1)).Throws<Exception>();
+        await Assert.That(() => new LargeList<int>(1, Constants.DefaultCapacityGrowFactor, Constants.DefaultFixedCapacityGrowAmount, Constants.DefaultFixedCapacityGrowLimit, 1.0)).Throws<Exception>();
+    }
+
+    private sealed class LargeArrayBuffer : ILargeArray<long>
+    {
+        private readonly long[] _data;
+
+        public LargeArrayBuffer(long count)
         {
-            return;
+            _data = new long[count];
         }
 
-        LargeList<long> largeList = new(capacity);
-
-        // Test 1: Individual Add operations
-        for (long i = 0; i < capacity; i++)
+        public LargeArrayBuffer(IReadOnlyLargeArray<long> source)
         {
-            largeList.Add(i);
-            await Assert.That(largeList.Count).IsEqualTo(i + 1L);
-            await Assert.That(largeList[i]).IsEqualTo(i);
+            _data = source.GetAll().ToArray();
         }
 
-        // Clear for next tests
-        largeList.Clear();
+        public long Count => _data.LongLength;
 
-        // Test 2: AddRange with IEnumerable (array)
-        if (capacity <= int.MaxValue)
+        public long this[long index]
         {
-            long[] sourceArray = new long[capacity];
-            for (long i = 0; i < capacity; i++)
+            get
             {
-                sourceArray[i] = i * 2;
+                StorageExtensions.CheckIndex(index, Count);
+                return _data[index];
             }
-            largeList.AddRange(sourceArray);
-            await Assert.That(largeList.Count).IsEqualTo(capacity);
-            for (long i = 0; i < capacity; i++)
+            set
             {
-                await Assert.That(largeList[i]).IsEqualTo(i * 2);
+                StorageExtensions.CheckIndex(index, Count);
+                _data[index] = value;
             }
         }
 
-        // Clear for next tests
-        largeList.Clear();
+        public long Get(long index) => this[index];
 
-        // Test 3: AddRange with LargeEnumerable
-        largeList.AddRange(LargeEnumerable.Range(capacity));
-        await Assert.That(largeList.Count).IsEqualTo(capacity);
-        for (long i = 0; i < capacity; i++)
+        public void Set(long index, long item) => this[index] = item;
+
+        public void Sort(Func<long, long, int> comparer)
         {
-            await Assert.That(largeList[i]).IsEqualTo(i);
+            comparer ??= static (a, b) => a.CompareTo(b);
+            Array.Sort(_data, 0, (int)Count, Comparer<long>.Create((x, y) => comparer(x, y)));
         }
 
-        // Test 4: AddRange with null IEnumerable
-        await Assert.That(() => largeList.AddRange((IEnumerable<long>)null)).Throws<ArgumentNullException>();
+        public void Sort(Func<long, long, int> comparer, long offset, long count)
+        {
+            StorageExtensions.CheckRange(offset, count, Count);
+            comparer ??= static (a, b) => a.CompareTo(b);
+            Array.Sort(_data, (int)offset, (int)count, Comparer<long>.Create((x, y) => comparer(x, y)));
+        }
 
-        // Clear for next tests
-        largeList.Clear();
+        public void Swap(long leftIndex, long rightIndex)
+        {
+            StorageExtensions.CheckIndex(leftIndex, Count);
+            StorageExtensions.CheckIndex(rightIndex, Count);
+            (_data[leftIndex], _data[rightIndex]) = (_data[rightIndex], _data[leftIndex]);
+        }
 
-        // Test 5: AddRange with empty collection
-        largeList.AddRange(Array.Empty<long>());
-        await Assert.That(largeList.Count).IsEqualTo(0L);
+        public long BinarySearch(long item, Func<long, long, int> comparer)
+            => BinarySearch(item, comparer, 0, Count);
 
-        // Test 6: AddRange with empty LargeEnumerable
-        largeList.AddRange(LargeEnumerable.Range(0L));
-        await Assert.That(largeList.Count).IsEqualTo(0L);
+        public long BinarySearch(long item, Func<long, long, int> comparer, long offset, long count)
+        {
+            StorageExtensions.CheckRange(offset, count, Count);
+            comparer ??= static (a, b) => a.CompareTo(b);
+            long low = offset;
+            long high = offset + count - 1;
+            while (low <= high)
+            {
+                long mid = low + ((high - low) / 2);
+                int cmp = comparer(_data[mid], item);
+                if (cmp == 0)
+                {
+                    return mid;
+                }
 
-        // Clear for next tests
-        largeList.Clear();
+                if (cmp < 0)
+                {
+                    low = mid + 1;
+                }
+                else
+                {
+                    high = mid - 1;
+                }
+            }
 
-        // Test 7: Multiple AddRange operations
+            return -1L;
+        }
+
+        public IEnumerable<long> GetAll()
+        {
+            for (long i = 0; i < _data.LongLength; i++)
+            {
+                yield return _data[i];
+            }
+        }
+
+        public IEnumerable<long> GetAll(long offset, long count)
+        {
+            StorageExtensions.CheckRange(offset, count, Count);
+            for (long i = 0; i < count; i++)
+            {
+                yield return _data[offset + i];
+            }
+        }
+
+        public bool Contains(long item) => Contains(item, 0, Count);
+
+        public bool Contains(long item, Func<long, long, bool> equalsFunction)
+            => Contains(item, 0, Count, equalsFunction);
+
+        public bool Contains(long item, long offset, long count)
+            => Contains(item, offset, count, static (a, b) => a == b);
+
+        public bool Contains(long item, long offset, long count, Func<long, long, bool> equalsFunction)
+        {
+            StorageExtensions.CheckRange(offset, count, Count);
+            equalsFunction ??= static (a, b) => a == b;
+            for (long i = 0; i < count; i++)
+            {
+                if (equalsFunction(_data[offset + i], item))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        public long IndexOf(long item) => Array.IndexOf(_data, item);
+
+        public long IndexOf(long item, Func<long, long, bool> equalsFunction)
+            => IndexOf(item, 0, Count, equalsFunction);
+
+        public long IndexOf(long item, long offset, long count)
+            => IndexOf(item, offset, count, static (a, b) => a == b);
+
+        public long IndexOf(long item, long offset, long count, Func<long, long, bool> equalsFunction)
+        {
+            StorageExtensions.CheckRange(offset, count, Count);
+            equalsFunction ??= static (a, b) => a == b;
+            for (long i = 0; i < count; i++)
+            {
+                if (equalsFunction(_data[offset + i], item))
+                {
+                    return offset + i;
+                }
+            }
+
+            return -1L;
+        }
+
+        public long LastIndexOf(long item) => Array.LastIndexOf(_data, item);
+
+        public long LastIndexOf(long item, Func<long, long, bool> equalsFunction)
+            => LastIndexOf(item, 0, Count, equalsFunction);
+
+        public long LastIndexOf(long item, long offset, long count)
+            => LastIndexOf(item, offset, count, static (a, b) => a == b);
+
+        public long LastIndexOf(long item, long offset, long count, Func<long, long, bool> equalsFunction)
+        {
+            StorageExtensions.CheckRange(offset, count, Count);
+            equalsFunction ??= static (a, b) => a == b;
+            for (long i = count - 1; i >= 0; i--)
+            {
+                if (equalsFunction(_data[offset + i], item))
+                {
+                    return offset + i;
+                }
+            }
+
+            return -1L;
+        }
+
+        public void CopyFrom(IReadOnlyLargeArray<long> source, long sourceOffset, long targetOffset, long count)
+        {
+            StorageExtensions.CheckRange(sourceOffset, count, source.Count);
+            StorageExtensions.CheckRange(targetOffset, count, Count);
+            for (long i = 0; i < count; i++)
+            {
+                this[targetOffset + i] = source[sourceOffset + i];
+            }
+        }
+
+        public void CopyFrom(ReadOnlyLargeSpan<long> source, long targetOffset, long count)
+        {
+            StorageExtensions.CheckRange(0, count, source.Count);
+            StorageExtensions.CheckRange(targetOffset, count, Count);
+            for (long i = 0; i < count; i++)
+            {
+                this[targetOffset + i] = source[i];
+            }
+        }
+
+        public void CopyFromArray(long[] source, int sourceOffset, long targetOffset, int count)
+        {
+            StorageExtensions.CheckRange(sourceOffset, count, source.Length);
+            StorageExtensions.CheckRange(targetOffset, count, Count);
+            Array.Copy(source, sourceOffset, _data, (int)targetOffset, count);
+        }
+
+        public void CopyFromSpan(ReadOnlySpan<long> source, long targetOffset, int count)
+        {
+            StorageExtensions.CheckRange(targetOffset, count, Count);
+            source.Slice(0, count).CopyTo(_data.AsSpan((int)targetOffset, count));
+        }
+
+        public void CopyTo(ILargeArray<long> target, long sourceOffset, long targetOffset, long count)
+        {
+            StorageExtensions.CheckRange(sourceOffset, count, Count);
+            StorageExtensions.CheckRange(targetOffset, count, target.Count);
+            for (long i = 0; i < count; i++)
+            {
+                target[targetOffset + i] = _data[sourceOffset + i];
+            }
+        }
+
+        public void CopyTo(LargeSpan<long> target, long sourceOffset, long count)
+        {
+            StorageExtensions.CheckRange(sourceOffset, count, Count);
+            for (long i = 0; i < count; i++)
+            {
+                target[i] = _data[sourceOffset + i];
+            }
+        }
+
+        public void CopyToArray(long[] target, long sourceOffset, int targetOffset, int count)
+        {
+            StorageExtensions.CheckRange(sourceOffset, count, Count);
+            StorageExtensions.CheckRange(targetOffset, count, target.Length);
+            Array.Copy(_data, (int)sourceOffset, target, targetOffset, count);
+        }
+
+        public void CopyToSpan(Span<long> target, long sourceOffset, int count)
+        {
+            StorageExtensions.CheckRange(sourceOffset, count, Count);
+            StorageExtensions.CheckRange(0, count, target.Length);
+            _data.AsSpan((int)sourceOffset, count).CopyTo(target);
+        }
+
+        public void DoForEach(Action<long> action)
+        {
+            if (action is null)
+            {
+                throw new ArgumentNullException(nameof(action));
+            }
+
+            foreach (long item in _data)
+            {
+                action(item);
+            }
+        }
+
+        public void DoForEach(Action<long> action, long offset, long count)
+        {
+            if (action is null)
+            {
+                throw new ArgumentNullException(nameof(action));
+            }
+
+            StorageExtensions.CheckRange(offset, count, Count);
+            for (long i = 0; i < count; i++)
+            {
+                action(_data[offset + i]);
+            }
+        }
+
+        public void DoForEach<TUserData>(ActionWithUserData<long, TUserData> action, ref TUserData userData)
+        {
+            if (action is null)
+            {
+                throw new ArgumentNullException(nameof(action));
+            }
+
+            foreach (long item in _data)
+            {
+                action(item, ref userData);
+            }
+        }
+
+        public void DoForEach<TUserData>(ActionWithUserData<long, TUserData> action, long offset, long count, ref TUserData userData)
+        {
+            if (action is null)
+            {
+                throw new ArgumentNullException(nameof(action));
+            }
+
+            StorageExtensions.CheckRange(offset, count, Count);
+            for (long i = 0; i < count; i++)
+            {
+                action(_data[offset + i], ref userData);
+            }
+        }
+
+        public IEnumerator<long> GetEnumerator() => ((IEnumerable<long>)_data).GetEnumerator();
+
+        IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
+    }
+
+    #endregion
+
+    #region Add / Indexer / Accessors
+
+    [Test]
+    [MethodDataSource(nameof(Capacities))]
+    public async Task Add_And_Indexer_Work(long capacity)
+    {
+        long itemCount = Math.Max(1, capacity);
+        LargeList<long> list = new(capacity);
+
+        for (long i = 0; i < itemCount; i++)
+        {
+            list.Add(i);
+        }
+
+        await Assert.That(list.Count).IsEqualTo(itemCount);
+
+        for (long i = 0; i < itemCount; i++)
+        {
+            await Assert.That(list[i]).IsEqualTo(i);
+            list[i] = MarkerBase + i;
+            await Assert.That(list.Get(i)).IsEqualTo(MarkerBase + i);
+        }
+
+        if (itemCount > 0)
+        {
+            ref long lastRef = ref list.GetRef(itemCount - 1);
+            long original = lastRef;
+            lastRef = original + 5;
+            await Assert.That(list[itemCount - 1]).IsEqualTo(original + 5);
+        }
+
+        await Assert.That(() => list[-1]).Throws<Exception>();
+        await Assert.That(() => list[-1] = 0).Throws<Exception>();
+        await Assert.That(() => list[itemCount]).Throws<Exception>();
+        await Assert.That(() => list[itemCount] = 0).Throws<Exception>();
+        await Assert.That(() => list.Get(-1)).Throws<Exception>();
+        await Assert.That(() => list.Get(itemCount)).Throws<Exception>();
+        await Assert.That(() => list.GetRef(-1)).Throws<Exception>();
+        await Assert.That(() => list.GetRef(itemCount)).Throws<Exception>();
+    }
+
+    #endregion
+
+    #region Contains / IndexOf / LastIndexOf
+
+    [Test]
+    [MethodDataSource(nameof(Capacities))]
+    public async Task Contains_IndexOf_LastIndexOf(long capacity)
+    {
+        LargeList<long> list = CreateSequentialList(capacity);
+
         if (capacity > 0)
         {
-            long halfCapacity = capacity / 2;
-            largeList.AddRange(LargeEnumerable.Range(halfCapacity));
-            largeList.AddRange(LargeEnumerable.Range(halfCapacity, capacity - halfCapacity));
-            await Assert.That(largeList.Count).IsEqualTo(capacity);
-            for (long i = 0; i < capacity; i++)
+            long baseIndex = Math.Max(0, capacity / 2);
+            long marker = MarkerBase + capacity;
+            list[baseIndex] = marker;
+            if (baseIndex + 1 < capacity)
             {
-                await Assert.That(largeList[i]).IsEqualTo(i);
+                list[baseIndex + 1] = marker;
             }
+
+            await Assert.That(list.Contains(marker)).IsTrue();
+            await Assert.That(list.Contains(marker, static (a, b) => a == b)).IsTrue();
+            await Assert.That(list.IndexOf(marker)).IsEqualTo(baseIndex);
+            await Assert.That(list.IndexOf(marker, static (a, b) => a == b)).IsEqualTo(baseIndex);
+
+            long expectedLast = baseIndex + (baseIndex + 1 < capacity ? 1 : 0);
+            await Assert.That(list.LastIndexOf(marker)).IsEqualTo(expectedLast);
+            await Assert.That(list.LastIndexOf(marker, static (a, b) => a == b)).IsEqualTo(expectedLast);
+
+            long offset = baseIndex;
+            long length = Math.Max(1, Math.Min(2, capacity - offset));
+            await Assert.That(list.Contains(marker, offset, length)).IsTrue();
+            await Assert.That(list.Contains(marker, offset, length, static (a, b) => a == b)).IsTrue();
+            await Assert.That(list.IndexOf(marker, offset, length)).IsEqualTo(offset);
+            await Assert.That(list.IndexOf(marker, offset, length, static (a, b) => a == b)).IsEqualTo(offset);
+            long expectedLastInRange = offset + Math.Min(1, length - 1);
+            await Assert.That(list.LastIndexOf(marker, offset, length)).IsEqualTo(expectedLastInRange);
+            await Assert.That(list.LastIndexOf(marker, offset, length, static (a, b) => a == b)).IsEqualTo(expectedLastInRange);
         }
 
-        // Clear for next tests
-        largeList.Clear();
+        long missingValue = MarkerBase + capacity + 10;
+        await Assert.That(list.Contains(missingValue)).IsFalse();
+        await Assert.That(list.Contains(missingValue, static (a, b) => a == b)).IsFalse();
 
-        // Test 8: Add beyond initial capacity to test auto-expansion
-        for (long i = 0; i < 10; i++)
+        long offsetCheck = Math.Min(1, Math.Max(0, list.Count - 1));
+        long lengthCheck = Math.Max(0, list.Count - offsetCheck);
+        await Assert.That(list.Contains(missingValue, offsetCheck, lengthCheck)).IsFalse();
+        await Assert.That(list.Contains(missingValue, offsetCheck, lengthCheck, static (a, b) => a == b)).IsFalse();
+
+        await Assert.That(list.IndexOf(missingValue)).IsEqualTo(-1L);
+        await Assert.That(list.LastIndexOf(missingValue)).IsEqualTo(-1L);
+
+        await Assert.That(() => list.Contains(missingValue, -1, 1)).Throws<Exception>();
+        await Assert.That(() => list.Contains(missingValue, 0, list.Count + 1)).Throws<Exception>();
+        await Assert.That(() => list.IndexOf(missingValue, -1, 1)).Throws<Exception>();
+        await Assert.That(() => list.IndexOf(missingValue, 0, list.Count + 1)).Throws<Exception>();
+        await Assert.That(() => list.LastIndexOf(missingValue, -1, 1)).Throws<Exception>();
+        await Assert.That(() => list.LastIndexOf(missingValue, 0, list.Count + 1)).Throws<Exception>();
+    }
+
+    #endregion
+
+    #region Sort / BinarySearch / Swap
+
+    [Test]
+    [MethodDataSource(nameof(Capacities))]
+    public async Task Sort_And_Swap_Work(long capacity)
+    {
+        LargeList<long> list = CreateSequentialList(capacity);
+
+        for (long i = 0; i < list.Count; i++)
         {
-            largeList.Add(i);
+            list[i] = list.Count > 0 ? list.Count - i : 0;
         }
-        await Assert.That(largeList.Count).IsEqualTo(10L);
-        await Assert.That(largeList.Capacity).IsGreaterThanOrEqualTo(10L);
+
+        list.Sort(null);
+        List<long> sorted = list.GetAll().ToList();
+        await Assert.That(sorted.SequenceEqual(sorted.OrderBy(x => x))).IsTrue();
+
+        if (list.Count > 1)
+        {
+            long offset = 0;
+            long length = Math.Min(list.Count, 5);
+            list.Sort(static (a, b) => b.CompareTo(a), offset, length);
+            List<long> segment = list.GetAll(offset, length).ToList();
+            await Assert.That(segment.SequenceEqual(segment.OrderByDescending(x => x))).IsTrue();
+
+            long left = 0;
+            long right = list.Count - 1;
+            long leftValue = list[left];
+            long rightValue = list[right];
+            list.Swap(left, right);
+            await Assert.That(list[left]).IsEqualTo(rightValue);
+            await Assert.That(list[right]).IsEqualTo(leftValue);
+        }
+
+        await Assert.That(() => list.Sort(null, -1, 1)).Throws<Exception>();
+        await Assert.That(() => list.Swap(-1, 0)).Throws<Exception>();
+        await Assert.That(() => list.Swap(0, list.Count)).Throws<Exception>();
     }
 
     [Test]
-    [MethodDataSource(typeof(LargeArrayTest), nameof(LargeArrayTest.CapacitiesTestCasesArguments))]
-    public async Task Remove(long capacity)
+    [MethodDataSource(nameof(Capacities))]
+    public async Task BinarySearch_Overloads(long capacity)
     {
-        if (capacity < 0L || capacity > Constants.MaxLargeCollectionCount)
-        {
-            return;
-        }
-
-        LargeList<long> largeList = new(capacity);
-
-        // Fill list for testing removal
+        LargeList<long> list = CreateSequentialList(capacity);
         for (long i = 0; i < capacity; i++)
         {
-            largeList.Add(i);
+            list[i] = i * 2;
         }
 
-        // Test 1: RemoveAt from different positions
-        for (long i = 0; i < capacity; i++)
+        long existing = capacity > 0 ? list[Math.Max(0, capacity / 2)] : 0;
+        long missing = existing + 1;
+
+        long result = list.BinarySearch(existing, static (a, b) => a.CompareTo(b));
+        if (capacity > 0)
         {
-            if (i % 2 == 0)
+            await Assert.That(result).IsEqualTo(Math.Max(0, capacity / 2));
+        }
+        else
+        {
+            await Assert.That(result).IsEqualTo(-1L);
+        }
+
+        long missingResult = list.BinarySearch(missing, static (a, b) => a.CompareTo(b));
+        await Assert.That(missingResult).IsEqualTo(-1L);
+
+        long offset = Math.Min(1, Math.Max(0, capacity - 1));
+        long length = Math.Max(0, capacity - offset);
+        if (length > 0)
+        {
+            long value = list[offset + length / 2];
+            long rangeResult = list.BinarySearch(value, static (a, b) => a.CompareTo(b), offset, length);
+            await Assert.That(rangeResult).IsEqualTo(offset + length / 2);
+        }
+
+        await Assert.That(() => list.BinarySearch(0, static (a, b) => 0, -1, 1)).Throws<Exception>();
+        await Assert.That(() => list.BinarySearch(0, static (a, b) => 0, 0, list.Count + 1)).Throws<Exception>();
+    }
+
+    #endregion
+
+    #region AddRange
+
+    [Test]
+    [MethodDataSource(nameof(Capacities))]
+    public async Task AddRange_IEnumerable_Overloads(long capacity)
+    {
+        long itemsToAdd = Math.Max(0, Math.Min(capacity, 5));
+        List<long> sequence = Enumerable.Range(0, (int)itemsToAdd).Select(i => (long)i).ToList();
+
+        LargeList<long> listFromList = new(0);
+        listFromList.AddRange(sequence);
+        await Assert.That(listFromList.GetAll().SequenceEqual(sequence)).IsTrue();
+
+        LargeList<long> listFromReadOnly = new(0);
+        IReadOnlyList<long> readOnly = sequence.AsReadOnly();
+        listFromReadOnly.AddRange(readOnly);
+        await Assert.That(listFromReadOnly.GetAll().SequenceEqual(readOnly)).IsTrue();
+
+        List<long> enumerableSource = sequence.Select(i => i + MarkerBase).ToList();
+        LargeList<long> listFromEnumerable = new(0);
+        listFromEnumerable.AddRange(enumerableSource.Select(i => i));
+        await Assert.That(listFromEnumerable.GetAll().SequenceEqual(enumerableSource)).IsTrue();
+
+        LargeList<long> validation = new(0);
+        await Assert.That(() => validation.AddRange((IEnumerable<long>)null!)).Throws<Exception>();
+    }
+
+    [Test]
+    [MethodDataSource(nameof(Capacities))]
+    public async Task AddRange_LargeArray_And_Spans(long capacity)
+    {
+        long safeCount = Math.Min(capacity, Constants.MaxLargeCollectionCount - 1);
+        LargeArray<long> arraySource = CreateSequentialArray(safeCount);
+        LargeList<long> listSource = CreateSequentialList(safeCount);
+        LargeArrayBuffer fallbackSource = new(arraySource);
+
+        LargeList<long> targetFromArray = new(0);
+        targetFromArray.AddRange(arraySource);
+        await Assert.That(targetFromArray.GetAll().SequenceEqual(arraySource.GetAll())).IsTrue();
+
+        LargeList<long> targetFromList = new(0);
+        targetFromList.AddRange(listSource);
+        await Assert.That(targetFromList.GetAll().SequenceEqual(listSource.GetAll())).IsTrue();
+
+        LargeList<long> targetFromStub = new(0);
+        targetFromStub.AddRange(fallbackSource);
+        await Assert.That(targetFromStub.GetAll().SequenceEqual(fallbackSource.GetAll())).IsTrue();
+
+        long offset = Math.Min(1, Math.Max(0, arraySource.Count - 1));
+        long count = Math.Max(0, arraySource.Count - offset);
+        if (count > 0)
+        {
+            LargeList<long> offsetTarget = new(0);
+            offsetTarget.AddRange(arraySource, offset);
+            await Assert.That(offsetTarget.GetAll().SequenceEqual(arraySource.GetAll(offset, arraySource.Count - offset))).IsTrue();
+
+            LargeList<long> rangeTarget = new(0);
+            rangeTarget.AddRange(arraySource, offset, count);
+            await Assert.That(rangeTarget.GetAll().SequenceEqual(arraySource.GetAll(offset, count))).IsTrue();
+        }
+
+        ReadOnlyLargeSpan<long> arraySpan = new(arraySource, 0, arraySource.Count);
+        LargeList<long> spanFromArrayTarget = new(0);
+        spanFromArrayTarget.AddRange(arraySpan);
+        await Assert.That(spanFromArrayTarget.GetAll().SequenceEqual(arraySource.GetAll())).IsTrue();
+
+        ReadOnlyLargeSpan<long> listSpan = new(listSource, 0, listSource.Count);
+        LargeList<long> spanFromListTarget = new(0);
+        spanFromListTarget.AddRange(listSpan);
+        await Assert.That(spanFromListTarget.GetAll().SequenceEqual(listSource.GetAll())).IsTrue();
+
+        long[] raw = Enumerable.Range(0, (int)Math.Min(arraySource.Count, 8)).Select(i => (long)(MarkerBase + i)).ToArray();
+        LargeList<long> rawTarget = new(0);
+        rawTarget.AddRange(raw);
+        await Assert.That(rawTarget.GetAll().SequenceEqual(raw)).IsTrue();
+
+        if (raw.Length > 0)
+        {
+            int rawOffset = Math.Min(1, raw.Length - 1);
+            int rawCount = raw.Length - rawOffset;
+
+            LargeList<long> rawRangeTarget = new(0);
+            rawRangeTarget.AddRange(raw, rawOffset, rawCount);
+            await Assert.That(rawRangeTarget.GetAll().SequenceEqual(raw.Skip(rawOffset).Take(rawCount))).IsTrue();
+
+            LargeList<long> rawSpanTarget = new(0);
+            rawSpanTarget.AddRange(raw.AsSpan(rawOffset, rawCount));
+            await Assert.That(rawSpanTarget.GetAll().SequenceEqual(raw.Skip(rawOffset).Take(rawCount))).IsTrue();
+        }
+
+        if (capacity >= Constants.MaxLargeCollectionCount)
+        {
+            LargeList<long> capacityGuard = CreateSequentialList(Constants.MaxLargeCollectionCount - 1);
+            await Assert.That(() => capacityGuard.AddRange(new long[] { 1L })).Throws<Exception>();
+        }
+
+        LargeList<long> validation = new(1);
+        await Assert.That(() => validation.AddRange((IReadOnlyLargeArray<long>)null!)).Throws<Exception>();
+        await Assert.That(() => validation.AddRange(arraySource, -1)).Throws<Exception>();
+        await Assert.That(() => validation.AddRange(arraySource, 0, arraySource.Count + 1)).Throws<Exception>();
+        await Assert.That(() => validation.AddRange((long[])null!)).Throws<Exception>();
+        await Assert.That(() => validation.AddRange(raw, -1, 1)).Throws<Exception>();
+        await Assert.That(() => validation.AddRange(raw, raw.Length + 1, 1)).Throws<Exception>();
+    }
+
+    #endregion
+
+    #region CopyFrom
+
+    [Test]
+    [MethodDataSource(nameof(Capacities))]
+    public async Task CopyFrom_Variants(long capacity)
+    {
+        LargeList<long> target = CreateSequentialList(capacity);
+        LargeArray<long> arraySource = CreateSequentialArray(capacity);
+        LargeList<long> listSource = CreateSequentialList(capacity);
+        LargeArrayBuffer fallbackSource = new(arraySource);
+
+        long copyCount = Math.Min(capacity, 5);
+        long sourceOffset = 0;
+        long targetOffset = capacity > copyCount ? capacity - copyCount : 0;
+
+        if (copyCount > 0)
+        {
+            target.CopyFrom(arraySource, sourceOffset, targetOffset, copyCount);
+            await VerifyRangeEquals(target, arraySource, targetOffset, sourceOffset, copyCount);
+
+            target.CopyFrom(listSource, sourceOffset, targetOffset, copyCount);
+            await VerifyRangeEquals(target, listSource, targetOffset, sourceOffset, copyCount);
+
+            target.CopyFrom(fallbackSource, sourceOffset, targetOffset, copyCount);
+            await VerifyRangeEquals(target, fallbackSource, targetOffset, sourceOffset, copyCount);
+        }
+        else
+        {
+            target.CopyFrom(arraySource, 0, 0, 0);
+        }
+
+        ReadOnlyLargeSpan<long> arraySpan = new(arraySource, 0, arraySource.Count);
+        ReadOnlyLargeSpan<long> listSpan = new(listSource, 0, listSource.Count);
+
+        if (capacity > 0)
+        {
+            long spanCount = Math.Min(capacity, 3);
+            target.CopyFrom(arraySpan, 0, spanCount);
+            await VerifyRangeEquals(target, arraySource, 0, 0, spanCount);
+
+            target.CopyFrom(listSpan, 0, spanCount);
+            await VerifyRangeEquals(target, listSource, 0, 0, spanCount);
+        }
+
+        long[] raw = Enumerable.Range(0, (int)Math.Min(capacity, 6)).Select(i => (long)(MarkerBase + i)).ToArray();
+        if (target.Count > 0 && raw.Length > 0)
+        {
+            int rawCount = Math.Min(raw.Length, (int)Math.Min(target.Count, 6));
+            target.CopyFromArray(raw, 0, 0, rawCount);
+            await VerifyRangeEquals(target, raw, 0, 0, rawCount);
+
+            target.CopyFromSpan(raw.AsSpan(0, rawCount), 0, rawCount);
+            await VerifyRangeEquals(target, raw, 0, 0, rawCount);
+        }
+
+        LargeList<long> validation = CreateSequentialList(Math.Max(1, capacity));
+        await Assert.That(() => validation.CopyFrom((IReadOnlyLargeArray<long>)null!, 0, 0, 1)).Throws<Exception>();
+        await Assert.That(() => validation.CopyFrom(arraySource, -1, 0, 1)).Throws<Exception>();
+        await Assert.That(() => validation.CopyFrom(arraySource, 0, -1, 1)).Throws<Exception>();
+        await Assert.That(() => validation.CopyFrom(arraySource, 0, validation.Count, 1)).Throws<Exception>();
+        await Assert.That(() => validation.CopyFrom(arraySource, arraySource.Count, 0, 1)).Throws<Exception>();
+        await Assert.That(() => validation.CopyFrom(arraySource, 0, 0, validation.Count + 1)).Throws<Exception>();
+        await Assert.That(() => validation.CopyFrom((ReadOnlyLargeSpan<long>)default, 0, 1)).Throws<Exception>();
+        await Assert.That(() => validation.CopyFromArray((long[])null!, 0, 0, 1)).Throws<Exception>();
+        await Assert.That(() => validation.CopyFromArray(raw, raw.Length + 1, 0, 1)).Throws<Exception>();
+        await Assert.That(() => validation.CopyFromArray(raw, 0, -1, 1)).Throws<Exception>();
+        await Assert.That(() => validation.CopyFromArray(raw, 0, validation.Count, 1)).Throws<Exception>();
+        await Assert.That(() => validation.CopyFromSpan(raw.AsSpan(), -1, 1)).Throws<Exception>();
+        await Assert.That(() => validation.CopyFromSpan(raw.AsSpan(), 0, raw.Length + 1)).Throws<Exception>();
+    }
+
+    #endregion
+
+    #region CopyTo
+
+    [Test]
+    [MethodDataSource(nameof(Capacities))]
+    public async Task CopyTo_Variants(long capacity)
+    {
+        LargeList<long> source = CreateSequentialList(capacity);
+        long safeTargetCount = Math.Min(Constants.MaxLargeCollectionCount, Math.Max(1, capacity + 3));
+        LargeArray<long> arrayTarget = new(safeTargetCount);
+        LargeList<long> listTarget = CreateSequentialList(Math.Min(Constants.MaxLargeCollectionCount - 1, safeTargetCount));
+        LargeArrayBuffer bufferTarget = new(safeTargetCount);
+
+        source.CopyTo(arrayTarget, 0, 0, 0);
+        source.CopyTo(listTarget, 0, 0, 0);
+        source.CopyTo(bufferTarget, 0, 0, 0);
+
+        long copyCount = Math.Min(capacity, 4);
+        long sourceOffset = capacity > copyCount ? 1 : 0;
+        long arrayTargetOffset = 0;
+        long listTargetOffset = 0;
+        long bufferTargetOffset = 0;
+        long secondaryOffset = copyCount > 1 ? 1 : 0;
+
+        if (copyCount > 0)
+        {
+            source.CopyTo(arrayTarget, sourceOffset, arrayTargetOffset, copyCount);
+            await VerifyRangeEquals(arrayTarget, source, arrayTargetOffset, sourceOffset, copyCount);
+
+            source.CopyTo(listTarget, sourceOffset, listTargetOffset, copyCount);
+            await VerifyRangeEquals(listTarget, source, listTargetOffset, sourceOffset, copyCount);
+
+            source.CopyTo(bufferTarget, sourceOffset, bufferTargetOffset, copyCount);
+            await VerifyRangeEquals(bufferTarget, source, bufferTargetOffset, sourceOffset, copyCount);
+
+            long offsetValidationCount = Math.Min(copyCount, 3);
+            if (offsetValidationCount > 0)
             {
-                largeList.RemoveAt(largeList.Count - 1L);
-            }
-            else
-            {
-                largeList.RemoveAt(0L);
-            }
-
-            long expectedValue = capacity - 1L - i;
-            await Assert.That(largeList.Count).IsEqualTo(expectedValue);
-        }
-
-        // Test 2: RemoveAt on empty list throws exception
-        await Assert.That(() => largeList.RemoveAt(0L)).Throws<IndexOutOfRangeException>();
-
-        // Test 3: RemoveAt with invalid index throws exception
-        largeList.Add(42L);
-        await Assert.That(() => largeList.RemoveAt(-1L)).Throws<IndexOutOfRangeException>();
-        await Assert.That(() => largeList.RemoveAt(1L)).Throws<IndexOutOfRangeException>();
-    }
-
-    [Test]
-    [MethodDataSource(typeof(LargeArrayTest), nameof(LargeArrayTest.CapacitiesTestCasesArguments))]
-    public async Task ClearShrinkAndCapacity(long capacity)
-    {
-        if (capacity < 0L || capacity > Constants.MaxLargeCollectionCount)
-        {
-            return;
-        }
-
-        LargeList<long> largeList = new(capacity);
-
-        // Fill list for testing
-        for (long i = 0; i < capacity; i++)
-        {
-            largeList.Add(i);
-        }
-
-        // Test 1: Clear operation
-        largeList.Clear();
-        await Assert.That(largeList.Count).IsEqualTo(0L);
-
-        // Test 2: Shrink operation
-        largeList.Shrink();
-        await Assert.That(largeList.Capacity).IsEqualTo(0L);
-
-        // Test 3: Index access on empty list throws exception
-        await Assert.That(() => largeList[0L]).Throws<IndexOutOfRangeException>();
-        await Assert.That(() => largeList[-1L]).Throws<IndexOutOfRangeException>();
-
-        // Test 4: Set operation on empty list throws exception
-        await Assert.That(() => largeList[0L] = 42L).Throws<IndexOutOfRangeException>();
-
-        // Test 5: Get operation on empty list throws exception
-        await Assert.That(() => largeList.Get(0L)).Throws<IndexOutOfRangeException>();
-        await Assert.That(() => largeList.Get(-1L)).Throws<IndexOutOfRangeException>();
-
-        // Test 6: GetRef operation on empty list throws exception (if IRefAccessLargeList is implemented)
-        if (largeList is IRefAccessLargeList<long> refAccess)
-        {
-            await Assert.That(() => refAccess.GetRef(0L)).Throws<IndexOutOfRangeException>();
-        }
-
-        // Test 7: Set operation on empty list throws exception
-        await Assert.That(() => largeList.Set(0L, 42L)).Throws<IndexOutOfRangeException>();
-
-        // Test 8: Add one item and test boundary conditions
-        largeList.Add(42L);
-        await Assert.That(largeList.Count).IsEqualTo(1L);
-
-        // Test 9: Valid access should work
-        await Assert.That(largeList[0L]).IsEqualTo(42L);
-        await Assert.That(largeList.Get(0L)).IsEqualTo(42L);
-
-        // Test 10: Invalid indices should throw
-        await Assert.That(() => largeList[1L]).Throws<IndexOutOfRangeException>();
-        await Assert.That(() => largeList[-1L]).Throws<IndexOutOfRangeException>();
-        await Assert.That(() => largeList.Get(1L)).Throws<IndexOutOfRangeException>();
-        await Assert.That(() => largeList.Get(-1L)).Throws<IndexOutOfRangeException>();
-        // Test GetRef bounds with IRefAccessLargeList interface
-        if (largeList is IRefAccessLargeList<long> refAccess2)
-        {
-            await Assert.That(() => refAccess2.GetRef(1L)).Throws<IndexOutOfRangeException>();
-            await Assert.That(() => refAccess2.GetRef(-1L)).Throws<IndexOutOfRangeException>();
-        }
-        await Assert.That(() => largeList.Set(1L, 99L)).Throws<IndexOutOfRangeException>();
-        await Assert.That(() => largeList.Set(-1L, 99L)).Throws<IndexOutOfRangeException>();
-
-        // Test 11: Setter with invalid indices
-        await Assert.That(() => largeList[1L] = 99L).Throws<IndexOutOfRangeException>();
-        await Assert.That(() => largeList[-1L] = 99L).Throws<IndexOutOfRangeException>();
-
-        // Test 12: EnsureRemainingCapacity with valid value
-        largeList.Clear();
-        largeList.Add(42L);
-        largeList.Shrink();
-        largeList.EnsureRemainingCapacity(10L);
-        await Assert.That(largeList.Capacity).IsGreaterThanOrEqualTo(largeList.Count + 10L);
-
-        // Test 13: EnsureRemainingCapacity with negative value
-        await Assert.That(() => largeList.EnsureRemainingCapacity(-1L)).Throws<ArgumentOutOfRangeException>();
-
-        // Test 14: Shrink operation after EnsureRemainingCapacity
-        largeList.Shrink();
-        await Assert.That(largeList.Capacity).IsEqualTo(1L);
-    }
-
-    [Test]
-    [MethodDataSource(typeof(LargeArrayTest), nameof(LargeArrayTest.CapacitiesWithOffsetTestCasesArguments))]
-    public async Task DoForEach(long capacity, long offset)
-    {
-        // input check
-        if (capacity < 0 || capacity > Constants.MaxLargeCollectionCount)
-        {
-            return;
-        }
-
-        LargeArray<long> largeArray = new(capacity);
-
-        await LargeArrayTest.DoForEachTest(largeArray, offset);
-    }
-
-    [Test]
-    [MethodDataSource(typeof(LargeArrayTest), nameof(LargeArrayTest.CapacitiesWithOffsetTestCasesArguments))]
-    public async Task SetGet(long capacity, long offset)
-    {
-        if (capacity < 0 || capacity > Constants.MaxLargeCollectionCount)
-        {
-            return;
-        }
-
-        LargeList<long> largeList = new(capacity);
-        largeList.AddRange(LargeEnumerable.Range(capacity));
-
-        await LargeArrayTest.SetGetTest(largeList, offset);
-    }
-
-    [Test]
-    [MethodDataSource(typeof(LargeArrayTest), nameof(LargeArrayTest.CapacitiesWithOffsetTestCasesArguments))]
-    public async Task Enumeration(long capacity, long offset)
-    {
-        if (capacity < 0 || capacity > Constants.MaxLargeCollectionCount)
-        {
-            return;
-        }
-
-        LargeList<long> largeList = new(capacity);
-        largeList.AddRange(LargeEnumerable.Range(capacity));
-
-        await LargeArrayTest.EnumerationTest(largeList, offset);
-    }
-
-    [Test]
-    [MethodDataSource(typeof(LargeArrayTest), nameof(LargeArrayTest.CapacitiesWithOffsetTestCasesArguments))]
-    public async Task Sort(long capacity, long offset)
-    {
-        if (capacity < 0 || capacity > Constants.MaxLargeCollectionCount)
-        {
-            return;
-        }
-
-        LargeList<long> largeList = new(capacity);
-        largeList.AddRange(LargeEnumerable.Range(capacity));
-
-        await LargeArrayTest.SortTest(largeList, offset);
-    }
-
-    [Test]
-    [MethodDataSource(typeof(LargeArrayTest), nameof(LargeArrayTest.CapacitiesWithOffsetTestCasesArguments))]
-    public async Task BinarySearch(long capacity, long offset)
-    {
-        if (capacity < 0 || capacity > Constants.MaxLargeCollectionCount)
-        {
-            return;
-        }
-
-        LargeList<long> largeList = new(capacity);
-        largeList.AddRange(LargeEnumerable.Range(capacity));
-
-        await LargeArrayTest.BinarySearchTest(largeList, offset);
-    }
-
-    [Test]
-    [MethodDataSource(typeof(LargeArrayTest), nameof(LargeArrayTest.CapacitiesWithOffsetTestCasesArguments))]
-    public async Task Contains(long capacity, long offset)
-    {
-        if (capacity < 0 || capacity > Constants.MaxLargeCollectionCount)
-        {
-            return;
-        }
-
-        LargeList<long> largeList = new(capacity);
-        largeList.AddRange(LargeEnumerable.Range(capacity));
-
-        await LargeArrayTest.ContainsTest(largeList, offset);
-    }
-
-    [Test]
-    [MethodDataSource(typeof(LargeArrayTest), nameof(LargeArrayTest.CapacitiesWithOffsetTestCasesArguments))]
-    public async Task Copy(long capacity, long offset)
-    {
-        if (capacity < 0 || capacity > Constants.MaxLargeCollectionCount)
-        {
-            return;
-        }
-
-        LargeList<long> largeList = new(capacity);
-        largeList.AddRange(LargeEnumerable.Range(capacity));
-
-        // Test with LargeArray as target
-        await LargeArrayTest.CopyTest(largeList, offset, capacity => new LargeArray<long>(capacity));
-
-        // Test with LargeList as target
-        await LargeArrayTest.CopyTest(largeList, offset, capacity => new LargeList<long>(LargeEnumerable.Repeat(1L, capacity), capacity));
-    }
-
-    [Test]
-    [MethodDataSource(typeof(LargeArrayTest), nameof(LargeArrayTest.CapacitiesWithOffsetTestCasesArguments))]
-    public async Task RefAccess(long capacity, long offset)
-    {
-        // input check
-        if (capacity < 0 || capacity > Constants.MaxLargeCollectionCount)
-        {
-            return;
-        }
-
-        LargeList<long> largeList = new(capacity);
-
-        // Fill the list with test data
-        for (long i = 0; i < capacity; i++)
-        {
-            largeList.Add(i);
-        }
-
-        // Test IRefAccess functionality
-        await LargeArrayTest.TestAllRefAccess(largeList, capacity, offset);
-    }
-
-    [Test]
-    public async Task MinLoadFactorShrinking()
-    {
-        // Test 1: Create list with MinLoadFactor 0.5 
-        LargeList<int> largeList = new(capacity: 100L, minLoadFactor: 0.5);
-
-        await Assert.That(largeList.MinLoadFactor).IsEqualTo(0.5);
-        await Assert.That(largeList.Capacity).IsEqualTo(100L);
-        await Assert.That(largeList.Count).IsEqualTo(0L);
-
-        // Test 2: Fill list to capacity
-        for (int i = 0; i < 80; i++)
-        {
-            largeList.Add(i);
-        }
-
-        long capacityAfterFill = largeList.Capacity;
-        await Assert.That(largeList.Count).IsEqualTo(80L);
-
-        // Test 3: Remove many items to trigger shrinking
-        // Remove 60 items, leaving 20 items
-        // Load factor will be 20/100 = 0.2, which is < 0.5 MinLoadFactor
-        for (int i = 0; i < 60; i++)
-        {
-            largeList.RemoveAt(largeList.Count - 1);
-        }
-
-        // Test 4: Verify shrinking occurred
-        await Assert.That(largeList.Count).IsEqualTo(20L);
-        await Assert.That(largeList.Capacity).IsLessThan(capacityAfterFill);
-
-        // Test 5: Verify remaining items are correct
-        for (int i = 0; i < 20; i++)
-        {
-            await Assert.That(largeList[i]).IsEqualTo(i);
-        }
-
-        // Test 6: Test with MinLoadFactor = 0 (disabled)
-        LargeList<int> noShrinkList = new(capacity: 100L, minLoadFactor: 0.0);
-
-        for (int i = 0; i < 80; i++)
-        {
-            noShrinkList.Add(i);
-        }
-
-        long capacityBeforeRemoval = noShrinkList.Capacity;
-
-        // Remove many items
-        for (int i = 0; i < 60; i++)
-        {
-            noShrinkList.RemoveAt(noShrinkList.Count - 1);
-        }
-
-        // Capacity should remain unchanged since MinLoadFactor is 0
-        await Assert.That(noShrinkList.Capacity).IsEqualTo(capacityBeforeRemoval);
-        await Assert.That(noShrinkList.Count).IsEqualTo(20L);
-    }
-
-    [Test]
-    public async Task MinLoadFactorConstructorValidation()
-    {
-        // Test 1: Valid MinLoadFactor values
-        LargeList<int> validList1 = new(minLoadFactor: 0.0);
-        await Assert.That(validList1.MinLoadFactor).IsEqualTo(0.0);
-
-        LargeList<int> validList2 = new(minLoadFactor: 0.5);
-        await Assert.That(validList2.MinLoadFactor).IsEqualTo(0.5);
-
-        LargeList<int> validList3 = new(minLoadFactor: 0.99);
-        await Assert.That(validList3.MinLoadFactor).IsEqualTo(0.99);
-
-        // Test 2: Invalid MinLoadFactor values should throw ArgumentOutOfRangeException
-        await Assert.That(() => new LargeList<int>(minLoadFactor: -0.1))
-            .Throws<ArgumentOutOfRangeException>();
-
-        await Assert.That(() => new LargeList<int>(minLoadFactor: 1.0))
-            .Throws<ArgumentOutOfRangeException>();
-
-        await Assert.That(() => new LargeList<int>(minLoadFactor: 1.5))
-            .Throws<ArgumentOutOfRangeException>();
-
-        // Test 3: Test constructors with IEnumerable
-        int[] items = [1, 2, 3, 4, 5];
-        LargeList<int> listFromEnum = new(items, minLoadFactor: 0.3);
-        await Assert.That(listFromEnum.MinLoadFactor).IsEqualTo(0.3);
-        await Assert.That(listFromEnum.Count).IsEqualTo(5L);
-
-#if NETSTANDARD2_1_OR_GREATER || NETCOREAPP3_0_OR_GREATER || NET5_0_OR_GREATER
-        // Test 4: Test constructors with ReadOnlySpan
-        ReadOnlySpan<int> span = items.AsSpan();
-        LargeList<int> listFromSpan = new(span, minLoadFactor: 0.4);
-        await Assert.That(listFromSpan.MinLoadFactor).IsEqualTo(0.4);
-        await Assert.That(listFromSpan.Count).IsEqualTo(5L);
-#endif
-    }
-
-    [Test]
-    [MethodDataSource(typeof(LargeArrayTest), nameof(LargeArrayTest.CapacitiesTestCasesArguments))]
-    public async Task GetAllMethods(long capacity)
-    {
-        if (capacity < 0 || capacity > Constants.MaxLargeCollectionCount)
-        {
-            return; // Skip invalid capacities
-        }
-
-        LargeList<long> largeList = new LargeList<long>(capacity);
-
-        // Add test data
-        for (long i = 0; i < Math.Min(capacity, 10L); i++)
-        {
-            largeList.Add(i);
-        }
-
-        // Test 1: GetAll() - returns all elements
-        List<long> allElements = largeList.GetAll().ToList();
-        await Assert.That(allElements.Count).IsEqualTo((int)largeList.Count);
-
-        if (largeList.Count > 0)
-        {
-            await Assert.That(allElements).IsEquivalentTo(LargeEnumerable.Range(largeList.Count));
-        }
-
-        // Test 2: GetAll(offset, count) - returns range
-        if (largeList.Count >= 3)
-        {
-            List<long> rangeElements = largeList.GetAll(1, 2).ToList();
-            await Assert.That(rangeElements).IsEquivalentTo(new[] { 1L, 2L });
-        }
-
-        // Test 3: GetAll with empty range
-        if (largeList.Count > 0)
-        {
-            List<long> emptyRange = largeList.GetAll(0, 0).ToList();
-            await Assert.That(emptyRange).IsEmpty();
-        }
-
-        // Test 4: GetAll exception handling
-        if (largeList.Count > 0)
-        {
-            await Assert.That(() => largeList.GetAll(-1, 1).ToList()).ThrowsExactly<ArgumentException>();
-            await Assert.That(() => largeList.GetAll(0, -1).ToList()).ThrowsExactly<ArgumentException>();
-            await Assert.That(() => largeList.GetAll(largeList.Count, 1).ToList()).ThrowsExactly<ArgumentException>();
-        }
-    }
-
-    [Test]
-    [MethodDataSource(typeof(LargeArrayTest), nameof(LargeArrayTest.CapacitiesWithOffsetTestCasesArguments))]
-    public async Task RemoveVariants(long capacity, long offset)
-    {
-        if (capacity < 0 || capacity > Constants.MaxLargeCollectionCount || offset < 0 || offset >= Math.Max(capacity, 1L))
-        {
-            return; // Skip invalid parameters
-        }
-
-        // Test 1: Remove with preserveOrder = false
-        LargeList<long> list1 = new LargeList<long>();
-        for (long i = 0; i < Math.Min(capacity, 10L); i++)
-        {
-            list1.Add(i);
-        }
-
-        if (list1.Count > 0)
-        {
-            long itemToRemove = list1[0];
-            bool removed1 = list1.Remove(itemToRemove, preserveOrder: false);
-            await Assert.That(removed1).IsTrue();
-            await Assert.That(list1.Contains(itemToRemove)).IsFalse();
-        }
-
-        // Test 2: Remove with preserveOrder = true
-        LargeList<long> list2 = new LargeList<long>();
-        for (long i = 0; i < Math.Min(capacity, 10L); i++)
-        {
-            list2.Add(i);
-        }
-
-        if (list2.Count > 2)
-        {
-            long originalCount = list2.Count;
-            bool removed2 = list2.Remove(1L, preserveOrder: true);
-            await Assert.That(removed2).IsTrue();
-            await Assert.That(list2.Count).IsEqualTo(originalCount - 1);
-            // Order should be preserved
-            if (list2.Count > 1)
-            {
-                await Assert.That(list2[0]).IsEqualTo(0L);
-                await Assert.That(list2[1]).IsEqualTo(2L);
+                LargeList<long> offsetListTarget = CreateSequentialList(Math.Max(4, offsetValidationCount + 2));
+                source.CopyTo(offsetListTarget, sourceOffset, secondaryOffset, offsetValidationCount);
+                await VerifyRangeEquals(offsetListTarget, source, secondaryOffset, sourceOffset, offsetValidationCount);
+
+                LargeArrayBuffer offsetBufferTarget = new(Math.Max(4, offsetValidationCount + 2));
+                source.CopyTo(offsetBufferTarget, sourceOffset, secondaryOffset, offsetValidationCount);
+                await VerifyRangeEquals(offsetBufferTarget, source, secondaryOffset, sourceOffset, offsetValidationCount);
             }
         }
 
-        // Test 3: Remove with out parameter
-        LargeList<long> list3 = new LargeList<long>();
-        for (long i = 0; i < Math.Min(capacity, 5L); i++)
+        long spanLength = Math.Max(copyCount, 1);
+        long spanOffset = Math.Min(secondaryOffset, spanLength == 0 ? 0 : spanLength - 1);
+        LargeList<long> spanBacker = CreateSequentialList(Math.Max(spanLength + spanOffset, 1));
+        LargeSpan<long> spanTarget = new(spanBacker, spanOffset, spanLength);
+        source.CopyTo(spanTarget, sourceOffset, copyCount);
+        if (copyCount > 0)
         {
-            list3.Add(i * 10);
+            await VerifyRangeEquals(spanBacker, source, spanOffset, sourceOffset, copyCount);
         }
 
-        if (list3.Count > 1) // Need at least 2 elements to test removal of second element
+        int rawLength = Math.Max((int)copyCount + 3, 3);
+        int rawOffset = copyCount > 0 ? 1 : 0;
+        int rawCount = (int)copyCount;
+
+        long[] arrayCopyTarget = Enumerable.Range(0, rawLength).Select(i => (long)(MarkerBase + i)).ToArray();
+        source.CopyToArray(arrayCopyTarget, sourceOffset, rawOffset, rawCount);
+        await VerifyRangeEquals(arrayCopyTarget, source, rawOffset, sourceOffset, rawCount);
+
+        long[] spanCopyTarget = Enumerable.Range(0, rawLength).Select(i => (long)(MarkerBase * 2 + i)).ToArray();
+        Span<long> rawSpan = spanCopyTarget.AsSpan(rawOffset);
+        source.CopyToSpan(rawSpan, sourceOffset, rawCount);
+        await VerifyRangeEquals(spanCopyTarget, source, rawOffset, sourceOffset, rawCount);
+
+        LargeList<long> guardSource = CreateSequentialList(3);
+        LargeArray<long> guardArray = new(4);
+        LargeList<long> guardList = CreateSequentialList(4);
+        LargeArrayBuffer guardBuffer = new(4);
+        long[] guardRawArray = new long[4];
+
+        await Assert.That(() => guardSource.CopyTo((ILargeArray<long>)null!, 0, 0, 1)).Throws<Exception>();
+        await Assert.That(() => guardSource.CopyTo(guardArray, -1, 0, 1)).Throws<Exception>();
+        await Assert.That(() => guardSource.CopyTo(guardArray, 0, -1, 1)).Throws<Exception>();
+        await Assert.That(() => guardSource.CopyTo(guardArray, guardSource.Count, 0, 1)).Throws<Exception>();
+        await Assert.That(() => guardSource.CopyTo(guardArray, 0, guardArray.Count, 1)).Throws<Exception>();
+        await Assert.That(() => guardSource.CopyTo(guardList, 0, guardList.Count, 1)).Throws<Exception>();
+        await Assert.That(() => guardSource.CopyTo(guardBuffer, 0, guardBuffer.Count, 1)).Throws<Exception>();
+        await Assert.That(() => guardSource.CopyTo(default, 0, 1)).Throws<Exception>();
+        await Assert.That(() => guardSource.CopyToArray((long[])null!, 0, 0, 1)).Throws<Exception>();
+        await Assert.That(() => guardSource.CopyToArray(guardRawArray, guardSource.Count, 0, 1)).Throws<Exception>();
+        await Assert.That(() => guardSource.CopyToArray(guardRawArray, 0, guardRawArray.Length, 1)).Throws<Exception>();
+        await Assert.That(() => guardSource.CopyToSpan(guardRawArray.AsSpan(), -1, 1)).Throws<Exception>();
+        await Assert.That(() => guardSource.CopyToSpan(guardRawArray.AsSpan(), 0, guardRawArray.Length + 1)).Throws<Exception>();
+    }
+
+    #endregion
+
+    #region Removal / Capacity Management
+
+    [Test]
+    [MethodDataSource(nameof(Capacities))]
+    public async Task Remove_Overloads(long capacity)
+    {
+        LargeList<long> missingList = CreateSequentialList(capacity);
+        bool missingRemoved = missingList.Remove(MarkerBase);
+        await Assert.That(missingRemoved).IsFalse();
+
+        LargeList<long> missingOutList = CreateSequentialList(capacity);
+        bool missingWithOut = missingOutList.Remove(MarkerBase, out long missingOutResult);
+        await Assert.That(missingWithOut).IsFalse();
+        await Assert.That(missingOutResult).IsEqualTo(default(long));
+
+        if (capacity == 0)
         {
-            bool removed3 = list3.Remove(10L, out long removedItem);
-            await Assert.That(removed3).IsTrue();
-            await Assert.That(removedItem).IsEqualTo(10L);
+            return;
         }
 
-        // Test 4: Remove with preserveOrder and out parameter
-        LargeList<long> list4 = new LargeList<long>();
-        for (long i = 0; i < Math.Min(capacity, 5L); i++)
+        long index = Math.Min(1, capacity - 1);
+        long targetValue = index;
+
+        LargeList<long> defaultRemove = CreateSequentialList(capacity);
+        bool removedDefault = defaultRemove.Remove(targetValue);
+        await Assert.That(removedDefault).IsTrue();
+        await Assert.That(defaultRemove.Count).IsEqualTo(capacity - 1);
+        await Assert.That(defaultRemove.IndexOf(targetValue)).IsEqualTo(-1L);
+
+        LargeList<long> preserveFalseList = CreateSequentialList(capacity);
+        bool removedNoOrder = preserveFalseList.Remove(targetValue, preserveOrder: false);
+        await Assert.That(removedNoOrder).IsTrue();
+        await Assert.That(preserveFalseList.Count).IsEqualTo(capacity - 1);
+        if (capacity > 1 && index < preserveFalseList.Count)
         {
-            list4.Add(i * 100);
+            await Assert.That(preserveFalseList[index]).IsEqualTo(capacity - 1);
         }
 
-        if (list4.Count > 1)
+        LargeList<long> withOutList = CreateSequentialList(capacity);
+        bool removedWithOut = withOutList.Remove(targetValue, out long removedItem);
+        await Assert.That(removedWithOut).IsTrue();
+        await Assert.That(removedItem).IsEqualTo(targetValue);
+
+        LargeList<long> preserveOutList = CreateSequentialList(capacity);
+        bool removedPreserveOut = preserveOutList.Remove(targetValue, preserveOrder: true, out long preserveOutItem);
+        await Assert.That(removedPreserveOut).IsTrue();
+        await Assert.That(preserveOutItem).IsEqualTo(targetValue);
+        if (index < preserveOutList.Count)
         {
-            bool removed4 = list4.Remove(100L, preserveOrder: true, out long removedItem2);
-            await Assert.That(removed4).IsTrue();
-            await Assert.That(removedItem2).IsEqualTo(100L);
+            await Assert.That(preserveOutList[index]).IsEqualTo(targetValue + 1);
+        }
+
+        LargeList<long> customEqualsList = CreateSequentialList(capacity);
+        long searchValue = targetValue + MarkerBase;
+        bool removedCustom = customEqualsList.Remove(searchValue, preserveOrder: true, out long customRemoved, static (long stored, long search) => stored == search - MarkerBase);
+        await Assert.That(removedCustom).IsTrue();
+        await Assert.That(customRemoved).IsEqualTo(targetValue);
+
+        LargeList<long> equalsOnlyList = CreateSequentialList(capacity);
+        bool removedWithEqualsOnly = equalsOnlyList.Remove(searchValue, static (long stored, long search) => stored == search - MarkerBase);
+        await Assert.That(removedWithEqualsOnly).IsTrue();
+    }
+
+    [Test]
+    [MethodDataSource(nameof(Capacities))]
+    public async Task RemoveAt_Variants(long capacity)
+    {
+        LargeList<long> empty = new(0);
+        await Assert.That(() => empty.RemoveAt(0)).Throws<Exception>();
+        await Assert.That(() => empty.RemoveAt(0, false)).Throws<Exception>();
+
+        LargeList<long> single = CreateSequentialList(1);
+        await Assert.That(() => single.RemoveAt(-1)).Throws<Exception>();
+
+        if (capacity == 0)
+        {
+            return;
+        }
+
+        long index = Math.Min(1, capacity - 1);
+        LargeList<long> preserveList = CreateSequentialList(capacity);
+        long removedPreserve = preserveList.RemoveAt(index);
+        await Assert.That(removedPreserve).IsEqualTo(index);
+        await Assert.That(preserveList.Count).IsEqualTo(capacity - 1);
+        if (index < preserveList.Count)
+        {
+            await Assert.That(preserveList[index]).IsEqualTo(index + 1);
+        }
+
+        LargeList<long> noOrderList = CreateSequentialList(capacity);
+        long removedNoOrder = noOrderList.RemoveAt(index, preserveOrder: false);
+        await Assert.That(removedNoOrder).IsEqualTo(index);
+        await Assert.That(noOrderList.Count).IsEqualTo(capacity - 1);
+        if (capacity > 1 && index < noOrderList.Count)
+        {
+            await Assert.That(noOrderList[index]).IsEqualTo(capacity - 1);
         }
     }
 
     [Test]
-    [MethodDataSource(typeof(LargeArrayTest), nameof(LargeArrayTest.CapacitiesTestCasesArguments))]
-    public async Task RemoveAtVariants(long capacity)
+    [MethodDataSource(nameof(Capacities))]
+    public async Task Clear_EnsureCapacity_And_Shrink_Work(long capacity)
     {
-        if (capacity < 0 || capacity > Constants.MaxLargeCollectionCount)
+        LargeList<long> list = CreateSequentialList(capacity);
+        list.Clear();
+        await Assert.That(list.Count).IsEqualTo(0L);
+        await Assert.That(list.Capacity).IsEqualTo(1L);
+        await Assert.That(list.GetAll().Any()).IsFalse();
+
+        list.Add(42);
+        long initialCapacity = list.Capacity;
+        long targetCapacity = Math.Max(initialCapacity + 3, 8);
+        list.EnsureCapacity(targetCapacity);
+        await Assert.That(list.Capacity).IsGreaterThanOrEqualTo(targetCapacity);
+
+        long remaining = 5;
+        long expectedCapacity = list.Count + remaining;
+        list.EnsureRemainingCapacity(remaining);
+        await Assert.That(list.Capacity).IsGreaterThanOrEqualTo(expectedCapacity);
+
+        await Assert.That(() => list.EnsureCapacity(-1)).Throws<Exception>();
+        await Assert.That(() => list.EnsureCapacity(Constants.MaxLargeCollectionCount + 1)).Throws<Exception>();
+        await Assert.That(() => list.EnsureRemainingCapacity(-1)).Throws<Exception>();
+        await Assert.That(() => list.EnsureRemainingCapacity(Constants.MaxLargeCollectionCount + 1)).Throws<Exception>();
+
+        list.EnsureCapacity(list.Capacity + 5);
+        list.Shrink();
+        await Assert.That(list.Capacity).IsEqualTo(list.Count);
+
+        long autoSize = Math.Min(Math.Max(capacity, 4), 32);
+        LargeList<long> autoShrink = new(autoSize, 2.0, Constants.DefaultFixedCapacityGrowAmount, Constants.DefaultFixedCapacityGrowLimit, 0.8);
+        for (long i = 0; i < autoSize; i++)
         {
-            return; // Skip invalid capacities
+            autoShrink.Add(i);
+        }
+        autoShrink.EnsureCapacity(autoSize * 2);
+        long expanded = autoShrink.Capacity;
+        autoShrink.RemoveAt(autoShrink.Count - 1);
+        await Assert.That(autoShrink.Capacity).IsEqualTo(autoShrink.Count);
+        await Assert.That(autoShrink.Capacity).IsLessThanOrEqualTo(expanded);
+    }
+
+    #endregion
+
+    #region Set / Enumeration
+
+    [Test]
+    [MethodDataSource(nameof(Capacities))]
+    public async Task Set_GetAll_And_Enumeration(long capacity)
+    {
+        LargeList<long> list = CreateSequentialList(capacity);
+        if (list.Count > 0)
+        {
+            long index = Math.Min(1, list.Count - 1);
+            list.Set(index, MarkerBase);
+            await Assert.That(list[index]).IsEqualTo(MarkerBase);
         }
 
-        // Test 1: RemoveAt with preserveOrder = false
-        LargeList<long> list1 = new LargeList<long>();
-        for (long i = 0; i < Math.Min(capacity, 10L); i++)
+        List<long> enumerated = list.ToList();
+        await Assert.That(list.GetAll().SequenceEqual(enumerated)).IsTrue();
+
+        long offset = Math.Min(1, Math.Max(0, list.Count - 1));
+        long count = Math.Max(0, list.Count - offset);
+        IEnumerable<long> range = list.GetAll(offset, count);
+        await Assert.That(range.SequenceEqual(enumerated.Skip((int)offset).Take((int)count))).IsTrue();
+
+        using IEnumerator<long> enumerator = list.GetEnumerator();
+        List<long> manual = new();
+        while (enumerator.MoveNext())
         {
-            list1.Add(i);
+            manual.Add(enumerator.Current);
         }
+        await Assert.That(manual.SequenceEqual(enumerated)).IsTrue();
 
-        if (list1.Count > 0)
+        System.Collections.IEnumerator nonGeneric = ((System.Collections.IEnumerable)list).GetEnumerator();
+        List<long> nonGenericItems = new();
+        while (nonGeneric.MoveNext())
         {
-            long originalCount = list1.Count;
-            long removedItem1 = list1.RemoveAt(0, preserveOrder: false);
-            await Assert.That(removedItem1).IsEqualTo(0L);
-            await Assert.That(list1.Count).IsEqualTo(originalCount - 1);
+            nonGenericItems.Add((long)nonGeneric.Current);
         }
+        await Assert.That(nonGenericItems.SequenceEqual(enumerated)).IsTrue();
 
-        // Test 2: RemoveAt with preserveOrder = true
-        LargeList<long> list2 = new LargeList<long>();
-        for (long i = 0; i < Math.Min(capacity, 10L); i++)
+        await Assert.That(() => list.Set(-1, 0)).Throws<Exception>();
+        await Assert.That(() => list.Set(list.Count, 0)).Throws<Exception>();
+        await Assert.That(() => list.GetAll(-1, 1).ToList()).Throws<Exception>();
+        await Assert.That(() => list.GetAll(0, list.Count + 1).ToList()).Throws<Exception>();
+    }
+
+    #endregion
+
+    #region DoForEach
+
+    [Test]
+    [MethodDataSource(nameof(Capacities))]
+    public async Task DoForEach_Overloads(long capacity)
+    {
+        LargeList<long> list = CreateSequentialList(capacity);
+        long sum = 0;
+        list.DoForEach(item => sum += item);
+        long expectedSum = list.GetAll().Sum();
+        await Assert.That(sum).IsEqualTo(expectedSum);
+
+        long offset = Math.Min(1, Math.Max(0, list.Count - 1));
+        long count = Math.Max(0, list.Count - offset);
+        long rangedSum = 0;
+        list.DoForEach(item => rangedSum += item, offset, count);
+        long expectedRangeSum = list.GetAll(offset, count).Sum();
+        await Assert.That(rangedSum).IsEqualTo(expectedRangeSum);
+
+        long userSum = 0;
+        list.DoForEach(static (long value, ref long acc) => acc += value, ref userSum);
+        await Assert.That(userSum).IsEqualTo(expectedSum);
+
+        long userRangeSum = 0;
+        list.DoForEach(static (long value, ref long acc) => acc += value, offset, count, ref userRangeSum);
+        await Assert.That(userRangeSum).IsEqualTo(expectedRangeSum);
+
+        LargeList<long> refList = CreateSequentialList(capacity);
+        refList.DoForEach(static (ref long value) => value += MarkerBase);
+        long[] refExpected = Enumerable.Range(0, (int)refList.Count).Select(i => (long)i + MarkerBase).ToArray();
+        await Assert.That(refList.GetAll().SequenceEqual(refExpected)).IsTrue();
+
+        LargeList<long> refRangeList = CreateSequentialList(capacity);
+        long[] before = refRangeList.GetAll().ToArray();
+        refRangeList.DoForEach(static (ref long value) => value += MarkerBase, offset, count);
+        long[] after = refRangeList.GetAll().ToArray();
+        for (long i = 0; i < after.LongLength; i++)
         {
-            list2.Add(i * 10);
-        }
-
-        if (list2.Count > 2)
-        {
-            long originalCount = list2.Count;
-            long removedItem2 = list2.RemoveAt(1, preserveOrder: true);
-            await Assert.That(removedItem2).IsEqualTo(10L);
-            await Assert.That(list2.Count).IsEqualTo(originalCount - 1);
-
-            // Verify order is preserved
-            await Assert.That(list2[0]).IsEqualTo(0L);
-            if (list2.Count > 1)
+            long expected = before[i];
+            if (i >= offset && i < offset + count)
             {
-                await Assert.That(list2[1]).IsEqualTo(20L);
+                expected += MarkerBase;
             }
+            await Assert.That(after[i]).IsEqualTo(expected);
+        }
+
+        LargeList<long> refUserList = CreateSequentialList(capacity);
+        long increment = 2;
+        refUserList.DoForEach(static (ref long value, ref long add) => value += add, ref increment);
+        long[] refUserExpected = Enumerable.Range(0, (int)refUserList.Count).Select(i => (long)i + increment).ToArray();
+        await Assert.That(refUserList.GetAll().SequenceEqual(refUserExpected)).IsTrue();
+
+        LargeList<long> refUserRangeList = CreateSequentialList(capacity);
+        long delta = 3;
+        long[] rangeBefore = refUserRangeList.GetAll().ToArray();
+        refUserRangeList.DoForEach(static (ref long value, ref long add) => value += add, offset, count, ref delta);
+        long[] rangeAfter = refUserRangeList.GetAll().ToArray();
+        for (long i = 0; i < rangeAfter.LongLength; i++)
+        {
+            long expected = rangeBefore[i];
+            if (i >= offset && i < offset + count)
+            {
+                expected += delta;
+            }
+            await Assert.That(rangeAfter[i]).IsEqualTo(expected);
         }
     }
 
     [Test]
-    [MethodDataSource(typeof(LargeArrayTest), nameof(LargeArrayTest.CapacitiesWithOffsetTestCasesArguments))]
-    public async Task RefActionDoForEach(long capacity, long offset)
+    public async Task DoForEach_ThrowsOnNullActions()
     {
-        if (capacity < 0 || capacity > Constants.MaxLargeCollectionCount || offset < 0 || offset >= Math.Max(capacity, 1L))
+        LargeList<long> list = CreateSequentialList(2);
+        await Assert.That(() => list.DoForEach((Action<long>)null!)).Throws<Exception>();
+        await Assert.That(() => list.DoForEach((Action<long>)null!, 0, 1)).Throws<Exception>();
+
+        long user = 0;
+        await Assert.That(() => list.DoForEach((ActionWithUserData<long, long>)null!, ref user)).Throws<Exception>();
+        await Assert.That(() => list.DoForEach((ActionWithUserData<long, long>)null!, 0, 1, ref user)).Throws<Exception>();
+
+        await Assert.That(() => list.DoForEach((RefAction<long>)null!)).Throws<Exception>();
+        await Assert.That(() => list.DoForEach((RefAction<long>)null!, 0, 1)).Throws<Exception>();
+
+        await Assert.That(() => list.DoForEach((RefActionWithUserData<long, long>)null!, ref user)).Throws<Exception>();
+        await Assert.That(() => list.DoForEach((RefActionWithUserData<long, long>)null!, 0, 1, ref user)).Throws<Exception>();
+    }
+
+    #endregion
+
+    #region Helpers
+
+    private static LargeList<long> CreateSequentialList(long count)
+    {
+        if (count < 0 || count > Constants.MaxLargeCollectionCount)
         {
-            return; // Skip invalid parameters
+            throw new ArgumentOutOfRangeException(nameof(count));
         }
 
-        LargeList<long> largeList = new LargeList<long>();
-        for (long i = 0; i < Math.Min(capacity, 10L); i++)
+        LargeList<long> list = new(count);
+        for (long i = 0; i < count; i++)
         {
-            largeList.Add(i);
+            list.Add(i);
         }
 
-        if (largeList.Count == 0)
+        return list;
+    }
+
+    private static LargeArray<long> CreateSequentialArray(long count)
+    {
+        if (count < 0 || count > Constants.MaxLargeCollectionCount)
         {
-            return; // Skip empty lists
+            throw new ArgumentOutOfRangeException(nameof(count));
         }
 
-        // Cast to IRefAccessLargeList to access RefAction methods
-        IRefAccessLargeList<long> refAccessList = largeList as IRefAccessLargeList<long>;
-        if (refAccessList == null)
+        LargeArray<long> array = new(count);
+        for (long i = 0; i < count; i++)
         {
-            return; // Skip if not implementing IRefAccessLargeList
+            array[i] = i;
         }
 
-        // Test 1: DoForEach with RefAction<T> - modify elements
-        refAccessList.DoForEach((ref long item) => item *= 2);
+        return array;
+    }
 
-        for (long i = 0; i < largeList.Count; i++)
+    private static async Task VerifyRangeEquals(IReadOnlyLargeArray<long> target, IReadOnlyLargeArray<long> source, long targetOffset, long sourceOffset, long count)
+    {
+        for (long i = 0; i < count; i++)
         {
-            await Assert.That(largeList[i]).IsEqualTo(i * 2);
-        }
-
-        // Test 2: DoForEach with RefAction<T> and range
-        if (largeList.Count > 2)
-        {
-            long rangeOffset = Math.Min(offset, largeList.Count - 2);
-            long rangeCount = Math.Min(2L, largeList.Count - rangeOffset);
-
-            refAccessList.DoForEach((ref long item) => item += 100, rangeOffset, rangeCount);
-
-            // Verify only range elements were modified
-            for (long i = rangeOffset; i < rangeOffset + rangeCount; i++)
+            if (targetOffset + i < target.Count && sourceOffset + i < source.Count)
             {
-                await Assert.That(largeList[i]).IsEqualTo((i * 2) + 100);
+                await Assert.That(target[targetOffset + i]).IsEqualTo(source[sourceOffset + i]);
             }
-        }
-
-        // Test 3: DoForEach with RefActionWithUserData<T, TUserData>
-        long multiplier = 3;
-        refAccessList.DoForEach((ref long item, ref long mult) => item *= mult, ref multiplier);
-
-        for (long i = 0; i < largeList.Count; i++)
-        {
-            long expectedValue = (i * 2) * 3;
-            if (largeList.Count > 2 && i >= Math.Min(offset, largeList.Count - 2) && i < Math.Min(offset + 2, largeList.Count))
-            {
-                expectedValue = ((i * 2) + 100) * 3;
-            }
-            await Assert.That(largeList[i]).IsEqualTo(expectedValue);
         }
     }
 
-    [Test]
-    [MethodDataSource(typeof(LargeArrayTest), nameof(LargeArrayTest.CapacitiesTestCasesArguments))]
-    public async Task AddRangeSpanVariants(long capacity)
+    private static async Task VerifyRangeEquals(IList<long> target, IReadOnlyLargeArray<long> source, long targetOffset, long sourceOffset, long count)
     {
-        if (capacity < 0 || capacity > Constants.MaxLargeCollectionCount)
+        for (long i = 0; i < count && targetOffset + i < target.Count && sourceOffset + i < source.Count; i++)
         {
-            return; // Skip invalid capacities
+            await Assert.That(target[(int)(targetOffset + i)]).IsEqualTo(source[sourceOffset + i]);
         }
-
-        LargeList<long> largeList = new LargeList<long>(capacity);
-
-        // Test 1: AddRange with ReadOnlySpan<T>
-        ReadOnlySpan<long> spanData = new long[] { 10L, 20L, 30L };
-        largeList.AddRange(spanData);
-
-        await Assert.That(largeList.Count).IsEqualTo(3L);
-        await Assert.That(largeList[0]).IsEqualTo(10L);
-        await Assert.That(largeList[1]).IsEqualTo(20L);
-        await Assert.That(largeList[2]).IsEqualTo(30L);
-
-        // Test 2: AddRange with empty span
-        ReadOnlySpan<long> emptySpan = ReadOnlySpan<long>.Empty;
-        long countBefore = largeList.Count;
-        largeList.AddRange(emptySpan);
-        await Assert.That(largeList.Count).IsEqualTo(countBefore);
-
-        // Test 3: AddRange with array offset and count
-        long[] sourceArray = { 100L, 200L, 300L, 400L, 500L };
-        largeList.AddRange(sourceArray, 1, 3); // Add 200, 300, 400
-
-        await Assert.That(largeList.Count).IsEqualTo(6L);
-        await Assert.That(largeList[3]).IsEqualTo(200L);
-        await Assert.That(largeList[4]).IsEqualTo(300L);
-        await Assert.That(largeList[5]).IsEqualTo(400L);
     }
+
+    private static async Task VerifyRangeEquals(long[] target, IReadOnlyLargeArray<long> source, long targetOffset, long sourceOffset, long count)
+    {
+        for (long i = 0; i < count && targetOffset + i < target.LongLength && sourceOffset + i < source.Count; i++)
+        {
+            await Assert.That(target[targetOffset + i]).IsEqualTo(source[sourceOffset + i]);
+        }
+    }
+
+    private static async Task VerifyRangeEquals(IReadOnlyLargeArray<long> target, long[] source, long targetOffset, long sourceOffset, long count)
+    {
+        for (long i = 0; i < count && targetOffset + i < target.Count && sourceOffset + i < source.LongLength; i++)
+        {
+            await Assert.That(target[targetOffset + i]).IsEqualTo(source[sourceOffset + i]);
+        }
+    }
+
+    private static async Task VerifyRangeEquals(long[] target, long[] source, long targetOffset, long sourceOffset, long count)
+    {
+        for (long i = 0; i < count && targetOffset + i < target.LongLength && sourceOffset + i < source.LongLength; i++)
+        {
+            await Assert.That(target[targetOffset + i]).IsEqualTo(source[sourceOffset + i]);
+        }
+    }
+
+    #endregion
 }
+

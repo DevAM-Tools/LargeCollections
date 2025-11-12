@@ -23,11 +23,14 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
 
+using System;
 using System.Collections;
+using System.Collections.Generic;
 using System.Collections.Specialized;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
+using System.Threading;
 
 namespace LargeCollections.Observable;
 
@@ -55,42 +58,9 @@ public class LargeObservableCollection<T> : ILargeObservableCollection<T>
 
     public LargeObservableCollection(long initialCapacity, bool suppressEventExceptions)
     {
-        _List = new LargeList<T>(initialCapacity);
+        _List = new(initialCapacity);
         _SuppressEventExceptions = suppressEventExceptions;
     }
-
-    public LargeObservableCollection(IEnumerable<T> items) : this(items, suppressEventExceptions: false)
-    {
-    }
-
-    public LargeObservableCollection(IEnumerable<T> items, bool suppressEventExceptions)
-    {
-        if (items is null)
-        {
-            throw new ArgumentNullException(nameof(items));
-        }
-        _List = [];
-        _SuppressEventExceptions = suppressEventExceptions;
-
-        AddRange(items);
-    }
-
-#if NETSTANDARD2_1_OR_GREATER || NETCOREAPP3_0_OR_GREATER || NET5_0_OR_GREATER
-    public LargeObservableCollection(ReadOnlySpan<T> span) : this(span, suppressEventExceptions: false)
-    {
-    }
-
-    public LargeObservableCollection(ReadOnlySpan<T> span, bool suppressEventExceptions)
-    {
-        _List = [];
-        _SuppressEventExceptions = suppressEventExceptions;
-
-        if (!span.IsEmpty)
-        {
-            AddRange(span);
-        }
-    }
-#endif
 
     public event NotifyCollectionChangedEventHandler CollectionChanged;
     public event PropertyChangedEventHandler PropertyChanged;
@@ -242,9 +212,48 @@ public class LargeObservableCollection<T> : ILargeObservableCollection<T>
         }
     }
 
+    /// <summary>
+    /// Adds a range of items from a large array to the collection.
+    /// </summary>
+    /// <param name="source">The source large array.</param>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public void AddRange(IReadOnlyLargeArray<T> source)
+    {
+        if (source is null)
+        {
+            throw new ArgumentNullException(nameof(source));
+        }
+        AddRange(source, 0, source.Count);
+    }
+
+    /// <summary>
+    /// Adds a range of items from a large array to the collection.
+    /// </summary>
+    /// <param name="source">The source large array.</param>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public void AddRange(IReadOnlyLargeArray<T> source, long offset)
+    {
+        if (source is null)
+        {
+            throw new ArgumentNullException(nameof(source));
+        }
+        AddRange(source, offset, source.Count - offset);
+    }
+
+    /// <summary>
+    /// Adds a range of items from a large array to the collection.
+    /// </summary>
+    /// <param name="source">The source large array.</param>
+    /// <param name="offset">The offset in the source array to start adding from.</param>
+    /// <param name="count">The number of items to add.</param>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void AddRange(IReadOnlyLargeArray<T> source, long offset, long count)
     {
+        if (count == 0L)
+        {
+            return;
+        }
+
         long initialCount = _List.Count;
         _List.AddRange(source, offset, count);
 
@@ -270,10 +279,15 @@ public class LargeObservableCollection<T> : ILargeObservableCollection<T>
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public void AddRange(T[] source)
+    public void AddRange(ReadOnlyLargeSpan<T> source)
     {
+        if (source.Count == 0)
+        {
+            return;
+        }
+
         long initialCount = _List.Count;
-        _List.AddRange(source, 0, source.Length);
+        _List.AddRange(source);
 
         long addedCount = _List.Count - initialCount;
         if (addedCount == 0)
@@ -296,9 +310,49 @@ public class LargeObservableCollection<T> : ILargeObservableCollection<T>
         }
     }
 
+    /// <summary>
+    /// Adds a range of items from an array to the collection.
+    /// </summary>
+    /// <param name="source">The source array.</param>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public void AddRange(T[] source)
+    {
+        if (source is null)
+        {
+            throw new ArgumentNullException(nameof(source));
+        }
+        AddRange(source, 0, source.Length);
+    }
+
+    /// <summary>
+    /// Adds a range of items from an array to the collection.
+    /// </summary>
+    /// <param name="source">The source array.</param>
+    /// <param name="offset">The offset in the source array to start adding from.</param>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public void AddRange(T[] source, int offset)
+    {
+        if (source is null)
+        {
+            throw new ArgumentNullException(nameof(source));
+        }
+        AddRange(source, offset, source.Length - offset);
+    }
+
+    /// <summary>
+    /// Adds a range of items from an array to the collection.
+    /// </summary>
+    /// <param name="source">The source array.</param>
+    /// <param name="offset">The offset in the source array to start adding from.</param>
+    /// <param name="count">The number of items to add.</param>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void AddRange(T[] source, int offset, int count)
     {
+        if (count == 0)
+        {
+            return;
+        }
+
         long initialCount = _List.Count;
         _List.AddRange(source, offset, count);
 
@@ -327,6 +381,11 @@ public class LargeObservableCollection<T> : ILargeObservableCollection<T>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void AddRange(ReadOnlySpan<T> source)
     {
+        if (source.Length == 0)
+        {
+            return;
+        }
+
         long initialCount = _List.Count;
         _List.AddRange(source);
 
@@ -380,10 +439,28 @@ public class LargeObservableCollection<T> : ILargeObservableCollection<T>
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public bool Remove(T item, bool preserveOrder, out T removedItem)
+        => Remove(item, preserveOrder, out removedItem, null);
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public bool Remove(T item, Func<T, T, bool> equalsFunction)
+            => Remove(item, true, out _, equalsFunction);
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public bool Remove(T item, bool preserveOrder, Func<T, T, bool> equalsFunction)
+            => Remove(item, preserveOrder, out _, equalsFunction);
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public bool Remove(T item, out T removedItem, Func<T, T, bool> equalsFunction)
+            => Remove(item, true, out removedItem, equalsFunction);
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public bool Remove(T item, bool preserveOrder, out T removedItem, Func<T, T, bool> equalsFunction)
     {
+        equalsFunction ??= LargeSet<T>.DefaultEqualsFunction;
+
         removedItem = default;
 
-        if (_List.Remove(item, preserveOrder, out removedItem))
+        if (_List.Remove(item, preserveOrder, out removedItem, equalsFunction))
         {
             // Calculating the index of the removed item would require a full scan which is to expensive - use Reset
             OnCollectionChanged(_ResetEventArgs);
@@ -460,23 +537,32 @@ public class LargeObservableCollection<T> : ILargeObservableCollection<T>
         => _List.Contains(item);
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public bool Contains(T item, Func<T, T, bool> equalsFunction)
+        => _List.Contains(item, equalsFunction);
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public bool Contains(T item, long offset, long count, Func<T, T, bool> equalsFunction)
+        => _List.Contains(item, offset, count, equalsFunction);
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void CopyFrom(IReadOnlyLargeArray<T> source, long sourceOffset, long targetOffset, long count)
     {
-        if (count <= 0L)
+        if (count == 0L)
         {
-            // Dummy call to get a consistent exception behavior
-            _List.CopyFrom(source, sourceOffset, targetOffset, count);
+            return;
         }
-        else if (count == 1L)
+
+        if (count == 1L)
         {
             StorageExtensions.CheckRange(targetOffset, count, Count);
+            StorageExtensions.CheckRange(sourceOffset, count, source.Count);
             T oldItem = _List[targetOffset];
-            _List.CopyFrom(source, sourceOffset, targetOffset, count);
+            T newItem = source[sourceOffset];
+            _List[targetOffset] = newItem;
 
             // Single item change - use specific event if index fits in int
             if (targetOffset <= int.MaxValue)
             {
-                T newItem = source[sourceOffset];
                 NotifyCollectionChangedEventArgs args = new(NotifyCollectionChangedAction.Replace, newItem, oldItem, (int)targetOffset);
                 OnCollectionChanged(args);
             }
@@ -495,23 +581,60 @@ public class LargeObservableCollection<T> : ILargeObservableCollection<T>
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public void CopyFromArray(T[] source, int sourceOffset, long targetOffset, int count)
+    public void CopyFrom(ReadOnlyLargeSpan<T> source, long targetOffset, long count)
     {
-        if (count <= 0L)
+        if (count == 0L)
         {
-            // Dummy call to get a consistent exception behavior
-            _List.CopyFromArray(source, sourceOffset, targetOffset, count);
+            return;
         }
-        else if (count == 1L)
+
+        if (count == 1L)
         {
             StorageExtensions.CheckRange(targetOffset, count, Count);
+            StorageExtensions.CheckRange(0L, count, source.Count);
             T oldItem = _List[targetOffset];
-            _List.CopyFromArray(source, sourceOffset, targetOffset, count);
+            T newItem = source[0L];
+            _List[targetOffset] = newItem;
 
             // Single item change - use specific event if index fits in int
             if (targetOffset <= int.MaxValue)
             {
-                T newItem = source[sourceOffset];
+                NotifyCollectionChangedEventArgs args = new(NotifyCollectionChangedAction.Replace, newItem, oldItem, (int)targetOffset);
+                OnCollectionChanged(args);
+            }
+            else
+            {
+                // Large index - use Reset
+                OnCollectionChanged(_ResetEventArgs);
+            }
+        }
+        else
+        {
+            _List.CopyFrom(source, targetOffset, count);
+            // Multiple items changed - use Reset
+            OnCollectionChanged(_ResetEventArgs);
+        }
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public void CopyFromArray(T[] source, int sourceOffset, long targetOffset, int count)
+    {
+        if (count == 0L)
+        {
+            return;
+        }
+
+        if (count == 1L)
+        {
+            StorageExtensions.CheckRange(targetOffset, count, Count);
+            StorageExtensions.CheckRange(sourceOffset, count, source.Length);
+            T oldItem = _List[targetOffset];
+            T newItem = source[sourceOffset];
+            _List[targetOffset] = newItem;
+
+            // Single item change - use specific event if index fits in int
+            if (targetOffset <= int.MaxValue)
+            {
                 NotifyCollectionChangedEventArgs args = new(NotifyCollectionChangedAction.Replace, newItem, oldItem, (int)targetOffset);
                 OnCollectionChanged(args);
             }
@@ -533,21 +656,22 @@ public class LargeObservableCollection<T> : ILargeObservableCollection<T>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void CopyFromSpan(ReadOnlySpan<T> source, long targetOffset, int count)
     {
-        if (count <= 0L)
+        if (count == 0L)
         {
-            // Dummy call to get a consistent exception behavior
-            _List.CopyFromSpan(source, targetOffset, count);
+            return;
         }
-        else if (count == 1L)
+
+        if (count == 1L)
         {
             StorageExtensions.CheckRange(targetOffset, count, Count);
+            StorageExtensions.CheckRange(0, count, source.Length);
             T oldItem = _List[targetOffset];
-            _List.CopyFromSpan(source, targetOffset, count);
+            T newItem = source[0];
+            _List[targetOffset] = newItem;
 
             // Single item change - use specific event if index fits in int
             if (targetOffset <= int.MaxValue)
             {
-                T newItem = source[0];
                 NotifyCollectionChangedEventArgs args = new(NotifyCollectionChangedAction.Replace, newItem, oldItem, (int)targetOffset);
                 OnCollectionChanged(args);
             }
@@ -569,6 +693,10 @@ public class LargeObservableCollection<T> : ILargeObservableCollection<T>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void CopyTo(ILargeArray<T> target, long sourceOffset, long targetOffset, long count)
         => _List.CopyTo(target, sourceOffset, targetOffset, count);
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public void CopyTo(LargeSpan<T> target, long sourceOffset, long count)
+        => _List.CopyTo(target, sourceOffset, count);
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void CopyToArray(T[] target, long sourceOffset, int targetOffset, int count)
@@ -615,6 +743,11 @@ public class LargeObservableCollection<T> : ILargeObservableCollection<T>
     public void Sort(Func<T, T, int> comparer)
     {
         _List.Sort(comparer);
+
+        if (Count <= 1L)
+        {
+            return;
+        }
 
         // Sort changes order - use Reset
         OnCollectionChanged(_ResetEventArgs);
@@ -664,10 +797,47 @@ public class LargeObservableCollection<T> : ILargeObservableCollection<T>
         return new NotificationSuspender(this);
     }
 
-    internal class NotificationSuspender(LargeObservableCollection<T> collection) : IDisposable
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public long IndexOf(T item)
+        => _List.IndexOf(item);
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public long IndexOf(T item, long offset, long count)
+        => _List.IndexOf(item, offset, count);
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public long IndexOf(T item, Func<T, T, bool> equalsFunction)
+        => _List.IndexOf(item, equalsFunction);
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public long IndexOf(T item, long offset, long count, Func<T, T, bool> equalsFunction)
+        => _List.IndexOf(item, offset, count, equalsFunction);
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public long LastIndexOf(T item)
+        => _List.LastIndexOf(item);
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public long LastIndexOf(T item, long offset, long count)
+        => _List.LastIndexOf(item, offset, count);
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public long LastIndexOf(T item, Func<T, T, bool> equalsFunction)
+        => _List.LastIndexOf(item, equalsFunction);
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public long LastIndexOf(T item, long offset, long count, Func<T, T, bool> equalsFunction)
+        => _List.LastIndexOf(item, offset, count, equalsFunction);
+
+    internal class NotificationSuspender : IDisposable
     {
-        private readonly LargeObservableCollection<T> _Collection = collection ?? throw new ArgumentNullException(nameof(collection));
+        private readonly LargeObservableCollection<T> _Collection;
         private bool _Disposed = false;
+
+        public NotificationSuspender(LargeObservableCollection<T> collection)
+        {
+            _Collection = collection ?? throw new ArgumentNullException(nameof(collection));
+        }
 
         public void Dispose()
         {

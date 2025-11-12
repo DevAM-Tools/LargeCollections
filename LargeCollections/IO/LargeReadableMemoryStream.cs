@@ -24,40 +24,34 @@ SOFTWARE.
 */
 
 
+using System;
 using System.Diagnostics;
+using System.IO;
 using System.Runtime.CompilerServices;
 
-namespace LargeCollections;
+namespace LargeCollections.IO;
 
 /// <summary>
-/// A slim readonly seekable wrapper for <see cref="Stream"/> APIs for <see cref="IReadOnlyLargeArray{byte}"/>.
+/// A slim readonly seekable wrapper for <see cref="Stream"/> APIs for <see cref="ReadOnlyLargeSpan{byte}"/>.
 /// </summary>
 [DebuggerDisplay("LargeReadableMemoryStream: Position = {Position}, Length = {Length}")]
 public class LargeReadableMemoryStream : Stream
 {
-    public LargeReadableMemoryStream(IReadOnlyLargeArray<byte> source)
+    public LargeReadableMemoryStream(ReadOnlyLargeSpan<byte> source)
     {
-        if (source is null)
-        {
-            throw new ArgumentNullException(nameof(source));
-        }
         Source = source;
         _Position = 0;
     }
 
-    private IReadOnlyLargeArray<byte> _Source;
+    private ReadOnlyLargeSpan<byte> _Source;
 
-    public IReadOnlyLargeArray<byte> Source
+    public ReadOnlyLargeSpan<byte> Source
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         get => _Source;
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         set
         {
-            if (value is null)
-            {
-                throw new ArgumentNullException(nameof(value));
-            }
             _Source = value;
             _Position = 0L;
         }
@@ -119,11 +113,18 @@ public class LargeReadableMemoryStream : Stream
             return -1; // End of stream
         }
 
-        byte value = _Source[(int)Position];
+        byte value = _Source[Position];
         Position++;
         return value;
     }
 
+    /// <summary>
+    /// Reads a portion of the stream into the given target buffer.
+    /// </summary>
+    /// <param name="target">The target buffer to read into.</param>
+    /// <param name="offset">The zero-based byte offset in <paramref name="target"/> at which to begin storing the data read from the stream.</param>
+    /// <param name="count">The maximum number of bytes to read from the stream.</param>
+    /// <returns>The total number of bytes read into the buffer. This can be less than the number of bytes requested if that many bytes are not currently available, or zero (0) if the end of the stream has been reached.</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public long Read(ILargeArray<byte> target, long offset, long count)
     {
@@ -144,6 +145,30 @@ public class LargeReadableMemoryStream : Stream
         }
 
         _Source.CopyTo(target, Position, offset, maxReadableCount);
+        Position += maxReadableCount;
+
+        return maxReadableCount;
+    }
+
+    /// <summary>
+    /// Reads a portion of the stream into the given target buffer.
+    /// </summary>
+    /// <param name="target">The target buffer to read into.</param>
+    /// <returns>The total number of bytes read into the buffer. This can be less than the number of bytes requested if that many bytes are not currently available, or zero (0) if the end of the stream has been reached.</returns>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public long Read(LargeSpan<byte> target)
+    {
+        long maxReadableCount = Length - Position;
+        if (maxReadableCount == 0L)
+        {
+            return 0;
+        }
+        if (target.Count < maxReadableCount)
+        {
+            maxReadableCount = target.Count;
+        }
+
+        _Source.CopyTo(target, Position, maxReadableCount);
         Position += maxReadableCount;
 
         return maxReadableCount;

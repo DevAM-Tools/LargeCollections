@@ -25,6 +25,4 @@ SOFTWARE.
 
 namespace LargeCollections.Observable;
 
-public interface ILargeObservableCollection<T> : IReadOnlyLargeObservableCollection<T>, ILargeList<T>
-{
-}
+public interface ILargeObservableCollection<T> : IReadOnlyLargeObservableCollection<T>, ILargeList<T>;

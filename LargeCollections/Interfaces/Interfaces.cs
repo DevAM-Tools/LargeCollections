@@ -23,6 +23,9 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
 
+using System;
+using System.Collections.Generic;
+
 namespace LargeCollections;
 
 public interface IReadOnlyLargeCollection<T> : IEnumerable<T>
@@ -79,10 +82,19 @@ public interface ILargeCollection<T> : IReadOnlyLargeCollection<T>
     /// <param name="items">An enumeration of items that shall be added to the collection.</param>
     void AddRange(IEnumerable<T> items);
 
+    /// <summary>
+    /// Adds multiple <paramref name="items"/> to the collection.
+    /// Depending on the actual collection implementation exisitng items may be replaced.
+    /// This overload is inteded to prevent boxing for ReadOnlyLargeSpans.
+    /// </summary>
+    /// <param name="items">A span of items that shall be added to the collection.</param>
+    void AddRange(ReadOnlyLargeSpan<T> items);
+
 #if NETSTANDARD2_1_OR_GREATER || NETCOREAPP3_0_OR_GREATER || NET5_0_OR_GREATER
     /// <summary>
     /// Adds multiple <paramref name="items"/> to the collection.
     /// Depending on the actual collection implementation exisitng items may be replaced.
+    ///  This overload is inteded to prevent boxing for ReadOnlySpan.
     /// </summary>
     /// <param name="items">A span of items that shall be added to the collection.</param>
     void AddRange(ReadOnlySpan<T> items);
@@ -158,6 +170,70 @@ public interface IReadOnlyLargeArray<T> : IReadOnlyLargeCollection<T>
     IEnumerable<T> GetAll(long offset, long count);
 
     /// <summary>
+    /// Finds the index of the first occurance of an <paramref name="item"/> within the collection.
+    /// </summary>
+    /// <param name="item">The item to find.</param>
+    /// <returns>The 0-based index of the item if it was found; otherwise, -1.</returns>
+    long IndexOf(T item);
+
+    /// <summary>
+    /// Finds the index of the first occurance of an <paramref name="item"/> within the collection using a custom equality function.
+    /// </summary>
+    /// <param name="item">The item to find.</param>
+    /// <param name="equalsFunction">The function that defines how to compare items.</param>
+    /// <returns>The 0-based index of the item if it was found; otherwise, -1.</returns>
+    long IndexOf(T item, Func<T, T, bool> equalsFunction);
+
+    /// <summary>
+    /// Finds the index of the first occurance of an <paramref name="item"/> within the given range defined by <paramref name="offset"/> and <paramref name="count"/>.
+    /// </summary>
+    /// <param name="item">The item to find.</param>
+    /// <param name="offset">The <paramref name="offset"/> where the range starts.</param>
+    /// <param name="count">The <paramref name="count"/> of elements that belong to the range.</param>
+    /// <returns>The 0-based index of the item if it was found; otherwise, -1.</returns>
+    long IndexOf(T item, long offset, long count);
+
+    /// <summary>
+    /// Finds the index of the first occurance of an <paramref name="item"/> within the collection using a custom equality function.
+    /// </summary>
+    /// <param name="item">The item to find.</param>
+    /// <param name="equalsFunction">The function that defines how to compare items.</param>
+    /// <returns>The 0-based index of the item if it was found; otherwise, -1.</returns>
+    long IndexOf(T item, long offset, long count, Func<T, T, bool> equalsFunction);
+
+    /// <summary>
+    /// Finds the index of the last occurance of an <paramref name="item"/> within the collection.
+    /// </summary>
+    /// <param name="item">The item to find.</param>
+    /// <returns>The 0-based index of the item if it was found; otherwise, -1.</returns>
+    long LastIndexOf(T item);
+
+    /// <summary>
+    /// Finds the index of the last occurance of an <paramref name="item"/> within the collection using a custom equality function.
+    /// </summary>
+    /// <param name="item">The item to find.</param>
+    /// <param name="equalsFunction">The function that defines how to compare items.</param>
+    /// <returns>The 0-based index of the item if it was found; otherwise, -1.</returns>
+    long LastIndexOf(T item, Func<T, T, bool> equalsFunction);
+
+    /// <summary>
+    /// Finds the index of the last occurance of an <paramref name="item"/> within the given range defined by <paramref name="offset"/> and <paramref name="count"/>.
+    /// </summary>
+    /// <param name="item">The item to find.</param>
+    /// <param name="offset">The <paramref name="offset"/> where the range starts.</param>
+    /// <param name="count">The <paramref name="count"/> of elements that belong to the range.</param>
+    /// <returns>The 0-based index of the item if it was found; otherwise, -1.</returns>
+    long LastIndexOf(T item, long offset, long count);
+
+    /// <summary>
+    /// Finds the index of the first occurance of an <paramref name="item"/> within the collection using a custom equality function.
+    /// </summary>
+    /// <param name="item">The item to find.</param>
+    /// <param name="equalsFunction">The function that defines how to compare items.</param>
+    /// <returns>The 0-based index of the item if it was found; otherwise, -1.</returns>
+    long LastIndexOf(T item, long offset, long count, Func<T, T, bool> equalsFunction);
+
+    /// <summary>
     /// Determines whether the collection contains a specific <paramref name="item"/> within the given range defined by <paramref name="offset"/> and <paramref name="count"/>.
     /// </summary>
     /// <param name="item">The item that shall be found.</param>
@@ -165,6 +241,24 @@ public interface IReadOnlyLargeArray<T> : IReadOnlyLargeCollection<T>
     /// <param name="count">The <paramref name="count"/> of elements that belong to the range.</param>
     /// <returns>true if the <paramref name="item"/> is present within the collection. Otherwise false is returned.</returns>
     bool Contains(T item, long offset, long count);
+
+    /// <summary>
+    /// Determines whether the collection contains a specific <paramref name="item"/> using a custom equality function.
+    /// </summary>
+    /// <param name="item">The item that shall be found.</param>
+    /// <param name="equalsFunction">The function that defines how to compare items.</param>
+    /// <returns>true if the <paramref name="item"/> is present within the collection. Otherwise false is returned.</returns>
+    bool Contains(T item, Func<T, T, bool> equalsFunction);
+
+    /// <summary>
+    /// Determines whether the collection contains a specific <paramref name="item"/> within the given range defined by <paramref name="offset"/> and <paramref name="count"/>.
+    /// </summary>
+    /// <param name="item">The item that shall be found.</param>
+    /// <param name="offset">The <paramref name="offset"/> where the range starts.</param>
+    /// <param name="count">The <paramref name="count"/> of elements that belong to the range.</param>
+    /// <param name="equalsFunction">The function that defines how to compare items.</param>
+    /// <returns>true if the <paramref name="item"/> is present within the collection. Otherwise false is returned.</returns>
+    bool Contains(T item, long offset, long count, Func<T, T, bool> equalsFunction);
 
     /// <summary>
     /// Performs the <paramref name="action"/> with items of the collection within the given range defined by <paramref name="offset"/> and <paramref name="count"/>.
@@ -197,6 +291,15 @@ public interface IReadOnlyLargeArray<T> : IReadOnlyLargeCollection<T>
 
     /// <summary>
     /// Copies <paramref name="count"/> items to the <paramref name="target"/> from this collection at <paramref name="sourceOffset"/>.
+    /// This overload is intended to prevent boxing for LargeSpans.
+    /// </summary>
+    /// <param name="target">The target where the items will be copied to.</param>
+    /// <param name="sourceOffset">The offset where the first item will be copied from.</param>
+    /// <param name="count">The number of items that will be copied.</param>
+    void CopyTo(LargeSpan<T> target, long sourceOffset, long count);
+
+    /// <summary>
+    /// Copies <paramref name="count"/> items to the <paramref name="target"/> from this collection at <paramref name="sourceOffset"/>.
     /// </summary>
     /// <param name="target">The target where the items will be copied to.</param>
     /// <param name="sourceOffset">The offset where the first item will be copied from.</param>
@@ -207,6 +310,7 @@ public interface IReadOnlyLargeArray<T> : IReadOnlyLargeCollection<T>
 # if NETSTANDARD2_1_OR_GREATER || NETCOREAPP3_0_OR_GREATER || NET5_0_OR_GREATER
     /// <summary>
     /// Copies <paramref name="count"/> items to the <paramref name="target"/> from this collection at <paramref name="sourceOffset"/>.
+    /// This overload is intended to prevent boxing for Spans.
     /// </summary>
     /// <param name="target">The target where the items will be copied to.</param>
     /// <param name="sourceOffset">The offset where the first item will be copied from.</param>
@@ -263,6 +367,15 @@ public interface ILargeArray<T> : IReadOnlyLargeArray<T>
 
     /// <summary>
     /// Copies <paramref name="count"/> items from the <paramref name="source"/> to this collection at <paramref name="targetOffset"/>.
+    /// This overload is intended to prevent boxing for ReadOnlyLargeSpan.
+    /// </summary>
+    /// <param name="source">The source where the items will be copied from.</param>
+    /// <param name="targetOffset">The offset where the first item will be copied to.</param>
+    /// <param name="count">The number of items that will be copied.</param>
+    void CopyFrom(ReadOnlyLargeSpan<T> source, long targetOffset, long count);
+
+    /// <summary>
+    /// Copies <paramref name="count"/> items from the <paramref name="source"/> to this collection at <paramref name="targetOffset"/>.
     /// </summary>
     /// <param name="source">The source where the items will be copied from.</param>
     /// <param name="sourceOffset">The offset where the first item will be copied from.</param>
@@ -273,9 +386,9 @@ public interface ILargeArray<T> : IReadOnlyLargeArray<T>
 #if NETSTANDARD2_1_OR_GREATER || NETCOREAPP3_0_OR_GREATER || NET5_0_OR_GREATER
     /// <summary>
     /// Copies <paramref name="count"/> items from the <paramref name="source"/> to this collection at <paramref name="targetOffset"/>.
+    /// This overload is intended to prevent boxing for ReadOnlySpan.
     /// </summary>
     /// <param name="source">The source where the items will be copied from.</param>
-    /// <param name="sourceOffset">The offset where the first item will be copied from.</param>
     /// <param name="targetOffset">The offset where the first item will be copied to.</param>
     /// <param name="count">The number of items that will be copied.</param>
     void CopyFromSpan(ReadOnlySpan<T> source, long targetOffset, int count);
@@ -348,6 +461,41 @@ public interface ILargeList<T> : ILargeArray<T>, ILargeCollection<T>
     bool Remove(T item, bool preserveOrder, out T removedItem);
 
     /// <summary>
+    /// Removes the first occurance of an <paramref name="item"/> from the collection.
+    /// </summary>
+    /// <param name="item">The <paramref name="item"/> that shall be removed from the collection.</param>
+    /// <param name="equalsFunction">The function that defines how to compare items.</param>
+    /// <returns>true if the <paramref name="item"/> was found and removed. Otherwise false is returned.</returns>
+    bool Remove(T item, Func<T, T, bool> equalsFunction);
+
+    /// <summary>
+    /// Removes the first occurance of an <paramref name="item"/> from the collection.
+    /// </summary>
+    /// <param name="item">The <paramref name="item"/> that shall be removed from the collection.</param>
+    /// <param name="equalsFunction">The function that defines how to compare items.</param>
+    /// <returns>true if the <paramref name="item"/> was found and removed. Otherwise false is returned.</returns>
+    bool Remove(T item, bool preserveOrder, Func<T, T, bool> equalsFunction);
+
+    /// <summary>
+    /// Removes the first occurance of an <paramref name="item"/> from the collection.
+    /// </summary>
+    /// <param name="item">The <paramref name="item"/> that shall be removed from the collection.</param>
+    /// <param name="removedItem">The removed item will be assigned if the <paramref name="item"/> was found. Otherwise the <see cref="default(T)"/> will be assigned.</param>
+    /// <param name="equalsFunction">The function that defines how to compare items.</param>
+    /// <returns>true if the <paramref name="item"/> was found and removed. Otherwise false is returned.</returns>
+    bool Remove(T item, out T removedItem, Func<T, T, bool> equalsFunction);
+
+    /// <summary>
+    /// Removes the first occurance of an <paramref name="item"/> from the collection.
+    /// </summary>
+    /// <param name="item">The <paramref name="item"/> that shall be removed from the collection.</param>
+    /// <param name="preserveOrder">If set to false the order of items may change but the operation will be faster.</param>
+    /// <param name="removedItem">The removed item will be assigned if the <paramref name="item"/> was found. Otherwise the <see cref="default(T)"/> will be assigned.</param>
+    /// <param name="equalsFunction">The function that defines how to compare items.</param>
+    /// <returns>true if the <paramref name="item"/> was found and removed. Otherwise false is returned.</returns>
+    bool Remove(T item, bool preserveOrder, out T removedItem, Func<T, T, bool> equalsFunction);
+
+    /// <summary>
     /// Removes the item at the specified 0-based <paramref name="index"/> if <paramref name="index"/> is within the valid range.
     /// </summary>
     /// <param name="index">The 0-based <paramref name="index"/> of the location where the item shall be removed.</param>
@@ -363,10 +511,7 @@ public interface ILargeList<T> : ILargeArray<T>, ILargeCollection<T>
     T RemoveAt(long index, bool preserveOrder);
 }
 
-public interface IRefAccessLargeList<T> : ILargeList<T>, IRefAccessLargeArray<T>
-{
-
-}
+public interface IRefAccessLargeList<T> : ILargeList<T>, IRefAccessLargeArray<T>;
 
 public interface IReadOnlyLargeDictionary<TKey, TValue> : IReadOnlyLargeCollection<KeyValuePair<TKey, TValue>> where TKey : notnull
 {
@@ -445,8 +590,6 @@ public interface ILargeDictionary<TKey, TValue> : IReadOnlyLargeDictionary<TKey,
     /// <param name="removedValue">The removed value will be assigned if the item was found. Otherwise the <see cref="default(T)"/> will be assigned.</param>
     /// <returns>true if the item was found and removed. Otherwise false is returned.</returns>
     bool Remove(TKey key, out TValue removedValue);
-
-
 }
 
 

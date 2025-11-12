@@ -23,7 +23,9 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
 
+using System;
 using System.Collections;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
 
@@ -34,8 +36,14 @@ namespace LargeCollections
     /// Arrays allow index based access to the elements.
     /// </summary>
     [DebuggerDisplay("LargeArray: Count = {Count}")]
-    public class LargeArray<T>(long capacity = 0L) : IRefAccessLargeArray<T>
+    public class LargeArray<T> : IRefAccessLargeArray<T>
     {
+        public LargeArray(long capacity)
+        {
+            _Storage = StorageExtensions.StorageCreate<T>(capacity);
+            Count = capacity;
+        }
+
         private static readonly Comparer<T> _DefaultComparer = Comparer<T>.Default;
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -45,7 +53,7 @@ namespace LargeCollections
             return result;
         }
 
-        private T[][] _Storage = StorageExtensions.StorageCreate<T>(capacity);
+        private T[][] _Storage;
 
         public long Count
         {
@@ -53,7 +61,7 @@ namespace LargeCollections
             get;
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
             private set;
-        } = capacity;
+        }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public void Resize(long capacity)
@@ -90,13 +98,18 @@ namespace LargeCollections
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public bool Contains(T item)
-        {
-            bool result = _Storage.Contains(item, 0L, Count, LargeSet<T>.DefaultEqualsFunction);
-            return result;
-        }
+            => Contains(item, 0L, Count, null);
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public bool Contains(T item, long offset, long count)
+        public bool Contains(T item, Func<T, T, bool> equalsFunction)
+            => Contains(item, 0L, Count, equalsFunction);
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public bool Contains(T item, long offset, long count) =>
+            Contains(item, offset, count, null);
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public bool Contains(T item, long offset, long count, Func<T, T, bool> equalsFunction)
         {
             StorageExtensions.CheckRange(offset, count, Count);
 
@@ -105,13 +118,20 @@ namespace LargeCollections
                 return false;
             }
 
-            bool result = _Storage.Contains(item, offset, count, LargeSet<T>.DefaultEqualsFunction);
+            equalsFunction ??= LargeSet<T>.DefaultEqualsFunction;
+
+            bool result = _Storage.Contains(item, offset, count, equalsFunction);
             return result;
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public void CopyFrom(IReadOnlyLargeArray<T> source, long sourceOffset, long targetOffset, long count)
         {
+            if (count == 0L)
+            {
+                return;
+            }
+
             if (source is null)
             {
                 throw new ArgumentNullException(nameof(source));
@@ -119,11 +139,6 @@ namespace LargeCollections
 
             StorageExtensions.CheckRange(sourceOffset, count, source.Count);
             StorageExtensions.CheckRange(targetOffset, count, Count);
-
-            if (count == 0L)
-            {
-                return;
-            }
 
             if (source is LargeArray<T> largeArraySource)
             {
@@ -146,19 +161,50 @@ namespace LargeCollections
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void CopyFrom(ReadOnlyLargeSpan<T> source, long targetOffset, long count)
+        {
+            if (count == 0L)
+            {
+                return;
+            }
+
+            StorageExtensions.CheckRange(0L, count, source.Count);
+            StorageExtensions.CheckRange(targetOffset, count, Count);
+
+            if (source.Inner is LargeArray<T> largeArraySource)
+            {
+                T[][] sourceStorage = largeArraySource.GetStorage();
+                _Storage.StorageCopyFrom(sourceStorage, source.Start, targetOffset, count);
+            }
+            else if (source.Inner is LargeList<T> largeListSource)
+            {
+                T[][] sourceStorage = largeListSource.GetStorage();
+                _Storage.StorageCopyFrom(sourceStorage, source.Start, targetOffset, count);
+            }
+            else
+            {
+                for (long i = 0L; i < count; i++)
+                {
+                    T item = source[i];
+                    _Storage.StorageSet(targetOffset + i, item);
+                }
+            }
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public void CopyFromArray(T[] source, int sourceOffset, long targetOffset, int count)
         {
+            if (count == 0L)
+            {
+                return;
+            }
+
             if (source is null)
             {
                 throw new ArgumentNullException(nameof(source));
             }
             StorageExtensions.CheckRange(sourceOffset, count, source.Length);
             StorageExtensions.CheckRange(targetOffset, count, Count);
-
-            if (count == 0L)
-            {
-                return;
-            }
 
             _Storage.StorageCopyFromArray(source, sourceOffset, targetOffset, count);
         }
@@ -167,13 +213,13 @@ namespace LargeCollections
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public void CopyFromSpan(ReadOnlySpan<T> source, long targetOffset, int count)
         {
-            StorageExtensions.CheckRange(0, count, source.Length);
-            StorageExtensions.CheckRange(targetOffset, count, Count);
-
             if (count == 0L)
             {
                 return;
             }
+
+            StorageExtensions.CheckRange(0, count, source.Length);
+            StorageExtensions.CheckRange(targetOffset, count, Count);
 
             _Storage.StorageCopyFromSpan(source, targetOffset, count);
         }
@@ -182,17 +228,17 @@ namespace LargeCollections
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public void CopyTo(ILargeArray<T> target, long sourceOffset, long targetOffset, long count)
         {
+            if (count == 0L)
+            {
+                return;
+            }
+
             if (target is null)
             {
                 throw new ArgumentNullException(nameof(target));
             }
             StorageExtensions.CheckRange(targetOffset, count, target.Count);
             StorageExtensions.CheckRange(sourceOffset, count, Count);
-
-            if (count == 0L)
-            {
-                return;
-            }
 
             if (target is LargeArray<T> largeArrayTarget)
             {
@@ -215,19 +261,50 @@ namespace LargeCollections
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void CopyTo(LargeSpan<T> target, long sourceOffset, long count)
+        {
+            if (count == 0L)
+            {
+                return;
+            }
+
+            StorageExtensions.CheckRange(0L, count, target.Count);
+            StorageExtensions.CheckRange(sourceOffset, count, Count);
+
+            if (target.Inner is LargeArray<T> largeArrayTarget)
+            {
+                T[][] targetStorage = largeArrayTarget.GetStorage();
+                _Storage.StorageCopyTo(targetStorage, sourceOffset, target.Start, count);
+            }
+            else if (target.Inner is LargeList<T> largeListTarget)
+            {
+                T[][] targetStorage = largeListTarget.GetStorage();
+                _Storage.StorageCopyTo(targetStorage, sourceOffset, target.Start, count);
+            }
+            else
+            {
+                for (long i = 0L; i < count; i++)
+                {
+                    T item = _Storage.StorageGet(sourceOffset + i);
+                    target[i] = item;
+                }
+            }
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public void CopyToArray(T[] target, long sourceOffset, int targetOffset, int count)
         {
+            if (count == 0L)
+            {
+                return;
+            }
+
             if (target is null)
             {
                 throw new ArgumentNullException(nameof(target));
             }
             StorageExtensions.CheckRange(targetOffset, count, target.Length);
             StorageExtensions.CheckRange(sourceOffset, count, Count);
-
-            if (count == 0L)
-            {
-                return;
-            }
 
             _Storage.StorageCopyToArray(target, sourceOffset, targetOffset, count);
         }
@@ -237,13 +314,13 @@ namespace LargeCollections
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public void CopyToSpan(Span<T> target, long sourceOffset, int count)
         {
-            StorageExtensions.CheckRange(0, count, target.Length);
-            StorageExtensions.CheckRange(sourceOffset, count, Count);
-
             if (count == 0L)
             {
                 return;
             }
+
+            StorageExtensions.CheckRange(0, count, target.Length);
+            StorageExtensions.CheckRange(sourceOffset, count, Count);
 
             _Storage.StorageCopyToSpan(target, sourceOffset, count);
         }
@@ -452,6 +529,50 @@ namespace LargeCollections
         internal T[][] GetStorage()
         {
             T[][] result = _Storage;
+            return result;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public long IndexOf(T item)
+            => IndexOf(item, 0L, Count, null);
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public long IndexOf(T item, Func<T, T, bool> equalsFunction)
+            => IndexOf(item, 0L, Count, equalsFunction);
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public long IndexOf(T item, long offset, long count)
+            => IndexOf(item, offset, count, null);
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public long IndexOf(T item, long offset, long count, Func<T, T, bool> equalsFunction)
+        {
+            StorageExtensions.CheckRange(offset, count, Count);
+
+            equalsFunction ??= LargeSet<T>.DefaultEqualsFunction;
+            long result = _Storage.StorageIndexOf(item, offset, count, equalsFunction);
+            return result;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public long LastIndexOf(T item)
+            => LastIndexOf(item, 0L, Count, null);
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public long LastIndexOf(T item, Func<T, T, bool> equalsFunction)
+            => LastIndexOf(item, 0L, Count, equalsFunction);
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public long LastIndexOf(T item, long offset, long count)
+            => LastIndexOf(item, offset, count, null);
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public long LastIndexOf(T item, long offset, long count, Func<T, T, bool> equalsFunction)
+        {
+            StorageExtensions.CheckRange(offset, count, Count);
+
+            equalsFunction ??= LargeSet<T>.DefaultEqualsFunction;
+            long result = _Storage.StorageLastIndexOf(item, offset, count, equalsFunction);
             return result;
         }
     }

@@ -24,7 +24,10 @@ SOFTWARE.
 */
 
 using Microsoft.Data.Sqlite;
+using System;
+using System.Collections.Generic;
 using System.Diagnostics;
+using System.Linq;
 using System.Runtime.CompilerServices;
 
 namespace LargeCollections.DiskCache;

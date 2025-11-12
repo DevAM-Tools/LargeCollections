@@ -24,10 +24,12 @@ SOFTWARE.
 */
 
 
+using System;
 using System.Diagnostics;
+using System.IO;
 using System.Runtime.CompilerServices;
 
-namespace LargeCollections;
+namespace LargeCollections.IO;
 
 /// <summary>
 /// A slim writeonly non seekable wrapper for <see cref="Stream"/> APIs for <see cref="LargeList{byte}"/>.
@@ -112,10 +114,55 @@ public class LargeWritableMemoryStream : Stream
         throw new NotSupportedException();
     }
 
+    /// <summary>
+    /// Writes the entire contents of the given buffer to the stream.
+    /// </summary>
+    /// <param name="buffer">The buffer to write from.</param>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public void Write(IReadOnlyLargeArray<byte> buffer)
+    {
+        if (buffer is null)
+        {
+            throw new ArgumentNullException(nameof(buffer));
+        }
+        Storage.AddRange(buffer);
+    }
+
+    /// <summary>
+    /// Writes a portion of the given buffer to the stream.
+    /// </summary>
+    /// <param name="buffer">The buffer to write from.</param>
+    /// <param name="offset">The zero-based byte offset in <paramref name="buffer"/> at which to begin copying bytes to the stream.</param>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public void Write(IReadOnlyLargeArray<byte> buffer, long offset)
+    {
+        if (buffer is null)
+        {
+            throw new ArgumentNullException(nameof(buffer));
+        }
+        Storage.AddRange(buffer, offset);
+    }
+
+    /// <summary>
+    /// Writes a portion of the given buffer to the stream.
+    /// </summary>
+    /// <param name="buffer">The buffer to write from.</param>
+    /// <param name="offset">The zero-based byte offset in <paramref name="buffer"/> at which to begin copying bytes to the stream.</param>
+    /// <param name="count">The number of bytes to write to the stream.</param>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void Write(IReadOnlyLargeArray<byte> buffer, long offset, long count)
     {
         Storage.AddRange(buffer, offset, count);
+    }
+
+    /// <summary>
+    /// Writes the entire contents of the given buffer to the stream.
+    /// </summary>
+    /// <param name="buffer">The buffer to write from.</param>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public void Write(ReadOnlyLargeSpan<byte> buffer)
+    {
+        Storage.AddRange(buffer);
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]

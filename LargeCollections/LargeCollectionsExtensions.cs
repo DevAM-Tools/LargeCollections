@@ -23,6 +23,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
 
+using System;
 using System.Runtime.CompilerServices;
 
 namespace LargeCollections;
@@ -86,4 +87,28 @@ public static class LargeCollectionsExtensions
         }
     }
 #endif
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static LargeSpan<T> AsLargeSpan<T>(this IRefAccessLargeArray<T> array)
+        => new(array);
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static LargeSpan<T> AsLargeSpan<T>(this IRefAccessLargeArray<T> array, long start)
+        => new(array, start);
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static LargeSpan<T> AsLargeSpan<T>(this IRefAccessLargeArray<T> array, long start, long count)
+        => new(array, start, count);
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static ReadOnlyLargeSpan<T> AsReadOnlyLargeSpan<T>(this IReadOnlyLargeArray<T> array)
+        => new(array);
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static ReadOnlyLargeSpan<T> AsReadOnlyLargeSpan<T>(this IReadOnlyLargeArray<T> array, long start)
+        => new(array, start);
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static ReadOnlyLargeSpan<T> AsReadOnlyLargeSpan<T>(this IReadOnlyLargeArray<T> array, long start, long count)
+        => new(array, start, count);
 }

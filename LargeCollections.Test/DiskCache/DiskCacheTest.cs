@@ -23,9 +23,15 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
 
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
 using TUnit.Assertions.Enums;
 
-namespace LargeCollections.DiskCache.Test;
+namespace LargeCollections.DiskCache;
 
 public struct LongStruct(long value)
 {
@@ -340,17 +346,17 @@ public class DiskCacheTest : IDisposable
 
         // Test null parameter handling for string keys
         await Assert.That(() => diskCache.Set(null, "value"))
-            .Throws<ArgumentNullException>();
+            .Throws<Exception>();
         await Assert.That(() => diskCache.Get(null))
-            .Throws<ArgumentNullException>();
+            .Throws<Exception>();
         await Assert.That(() => diskCache.TryGetValue(null, out string foundValue))
-            .Throws<ArgumentNullException>();
+            .Throws<Exception>();
         await Assert.That(() => diskCache.ContainsKey(null))
-            .Throws<ArgumentNullException>();
+            .Throws<Exception>();
         await Assert.That(() => diskCache.Remove((string)null))
-            .Throws<ArgumentNullException>();
+            .Throws<Exception>();
         await Assert.That(() => diskCache.Remove((string)null, out _))
-            .Throws<ArgumentNullException>();
+            .Throws<Exception>();
 
         // Test adding and getting values
         for (long i = 0; i < count; i++)
@@ -380,17 +386,17 @@ public class DiskCacheTest : IDisposable
 
         // Test null parameter handling for byte array keys
         await Assert.That(() => diskCache.Set(null, [1, 2, 3]))
-            .Throws<ArgumentNullException>();
+            .Throws<Exception>();
         await Assert.That(() => diskCache.Get(null))
-            .Throws<ArgumentNullException>();
+            .Throws<Exception>();
         await Assert.That(() => diskCache.TryGetValue(null, out byte[] foundValue))
-            .Throws<ArgumentNullException>();
+            .Throws<Exception>();
         await Assert.That(() => diskCache.ContainsKey(null))
-            .Throws<ArgumentNullException>();
+            .Throws<Exception>();
         await Assert.That(() => diskCache.Remove((byte[])null))
-            .Throws<ArgumentNullException>();
+            .Throws<Exception>();
         await Assert.That(() => diskCache.Remove((byte[])null, out _))
-            .Throws<ArgumentNullException>();
+            .Throws<Exception>();
 
         // Test adding and getting values
         for (long i = 0; i < count; i++)

@@ -23,6 +23,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
 
+using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 
 namespace LargeCollections;
@@ -32,14 +33,16 @@ public static class EnumerableExtensions
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static LargeList<T> ToLargeList<T>(this IEnumerable<T> items)
     {
-        LargeList<T> largeList = new(items);
+        LargeList<T> largeList = [];
+        largeList.AddRange(items);
         return largeList;
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static LargeSet<T> ToLargeSet<T>(this IEnumerable<T> items)
     {
-        LargeSet<T> largeSet = new(items);
+        LargeSet<T> largeSet = [];
+        largeSet.AddRange(items);
         return largeSet;
     }
 

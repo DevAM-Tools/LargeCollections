@@ -23,6 +23,9 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
 
+using System;
+using System.Collections.Generic;
+using System.IO;
 using System.Runtime.CompilerServices;
 
 namespace LargeCollections;
@@ -92,7 +95,7 @@ public static class StorageExtensions
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal static (int StorageIndex, int ItemIndex) StorageGetIndex(long index)
     {
-        int storageIndex = (int)((index >> Constants.StorageIndexShiftAmount) & (Constants.MaxStorageCapacity - 1L));
+        int storageIndex = (int)(index >> Constants.StorageIndexShiftAmount);
         int itemIndex = (int)(index & (Constants.MaxStorageCapacity - 1L));
 
         return (storageIndex, itemIndex);
@@ -119,8 +122,15 @@ public static class StorageExtensions
             throw new ArgumentOutOfRangeException(nameof(capacity));
         }
 
-        (int storageCount, int remainder) = StorageGetIndex(capacity);
-        storageCount++;
+        if (capacity == 0L)
+        {
+            return Array.Empty<T[]>();
+        }
+
+        long lastIndex = capacity - 1L;
+        (int storageIndex, int itemIndex) = StorageGetIndex(lastIndex);
+        int storageCount = storageIndex + 1;
+        int lastSegmentLength = itemIndex + 1;
 
         T[][] result = new T[storageCount][];
 
@@ -128,9 +138,52 @@ public static class StorageExtensions
         {
             result[i] = new T[Constants.MaxStorageCapacity];
         }
-        result[storageCount - 1] = new T[remainder];
+
+        result[storageCount - 1] = new T[lastSegmentLength];
 
         return result;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal static void StorageResize<T>(ref T[][] array, long capacity)
+    {
+        if (capacity < 0L || capacity > Constants.MaxLargeCollectionCount)
+        {
+            throw new ArgumentOutOfRangeException(nameof(capacity));
+        }
+
+        if (capacity == 0L)
+        {
+            array = Array.Empty<T[]>();
+            return;
+        }
+
+        long lastIndex = capacity - 1L;
+        (int storageIndex, int itemIndex) = StorageGetIndex(lastIndex);
+        int newStorageCount = storageIndex + 1;
+        int lastSegmentLength = itemIndex + 1;
+
+        Array.Resize(ref array, newStorageCount);
+
+        for (int i = 0; i < newStorageCount - 1; i++)
+        {
+            if (array[i] == null || array[i].Length != Constants.MaxStorageCapacity)
+            {
+                Array.Resize(ref array[i], (int)Constants.MaxStorageCapacity);
+            }
+        }
+
+        if (newStorageCount > 0)
+        {
+            if (array[newStorageCount - 1] == null)
+            {
+                array[newStorageCount - 1] = new T[lastSegmentLength];
+            }
+            else if (array[newStorageCount - 1].Length != lastSegmentLength)
+            {
+                Array.Resize(ref array[newStorageCount - 1], lastSegmentLength);
+            }
+        }
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -266,10 +319,14 @@ public static class StorageExtensions
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal static bool Contains<T>(this T[][] array, T item, long offset, long count, Func<T, T, bool> equalsFunction)
+        => array.StorageIndexOf(item, offset, count, equalsFunction) >= 0L;
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal static long StorageIndexOf<T>(this T[][] array, T item, long offset, long count, Func<T, T, bool> equalsFunction)
     {
         if (count == 0L)
         {
-            return false;
+            return -1L;
         }
 
         (int storageIndex, int itemIndex) = StorageGetIndex(offset);
@@ -281,12 +338,12 @@ public static class StorageExtensions
         {
             if (currentCount >= count)
             {
-                return false;
+                return -1L;
             }
             T currentItem = currentStorage[j];
-            if (equalsFunction.Invoke(item, currentItem))
+            if (equalsFunction.Invoke(currentItem, item))
             {
-                return true;
+                return offset + currentCount;
             }
             currentCount++;
         }
@@ -295,26 +352,84 @@ public static class StorageExtensions
         {
             if (currentCount >= count)
             {
-                return false;
+                return -1L;
             }
             currentStorage = array[i];
             for (int j = 0; j < currentStorage.Length; j++)
             {
                 if (currentCount >= count)
                 {
-                    return false;
+                    return -1L;
                 }
 
                 T currentItem = currentStorage[j];
-                if (equalsFunction.Invoke(item, currentItem))
+                if (equalsFunction.Invoke(currentItem, item))
                 {
-                    return true;
+                    return offset + currentCount;
                 }
                 currentCount++;
             }
         }
 
-        return false;
+        return -1L;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal static long StorageLastIndexOf<T>(this T[][] array, T item, long offset, long count, Func<T, T, bool> equalsFunction)
+    {
+        if (count == 0L)
+        {
+            return -1L;
+        }
+
+        long endIndex = offset + count - 1L;
+        (int endStorageIndex, int endItemIndex) = StorageGetIndex(endIndex);
+
+        long currentCount = 0L;
+        long lastFoundIndex = -1L;
+
+        // Start from the end and work backwards
+        T[] currentStorage = array[endStorageIndex];
+        for (int j = endItemIndex; j >= 0; j--)
+        {
+            if (currentCount >= count)
+            {
+                break;
+            }
+            T currentItem = currentStorage[j];
+            if (equalsFunction.Invoke(currentItem, item))
+            {
+                lastFoundIndex = endIndex - currentCount;
+                return lastFoundIndex; // Return immediately when found (first from end = last from start)
+            }
+            currentCount++;
+        }
+
+        for (int i = endStorageIndex - 1; i >= 0; i--)
+        {
+            if (currentCount >= count)
+            {
+                break;
+            }
+            currentStorage = array[i];
+            for (int j = currentStorage.Length - 1; j >= 0; j--)
+            {
+                if (currentCount >= count)
+                {
+                    break;
+                }
+
+                T currentItem = currentStorage[j];
+                if (equalsFunction.Invoke(currentItem, item))
+                {
+                    lastFoundIndex = endIndex - currentCount;
+                    return lastFoundIndex; // Return immediately when found
+                }
+                currentCount++;
+            }
+        }
+
+        return lastFoundIndex;
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -608,43 +723,5 @@ public static class StorageExtensions
         }
 
         return currentCount;
-    }
-
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    internal static void StorageResize<T>(ref T[][] array, long capacity)
-    {
-        if (capacity < 0L || capacity > Constants.MaxLargeCollectionCount)
-        {
-            throw new ArgumentOutOfRangeException(nameof(capacity));
-        }
-
-        (int newStorageCount, int newRemainder) = StorageGetIndex(capacity);
-        newStorageCount++;
-
-        Array.Resize(ref array, newStorageCount);
-
-        for (int i = 0; i < newStorageCount - 1; i++)
-        {
-            if (array[i] == null)
-            {
-                array[i] = new T[Constants.MaxStorageCapacity];
-            }
-            else if (array[i].Length < Constants.MaxStorageCapacity)
-            {
-                Array.Resize(ref array[i], (int)Constants.MaxStorageCapacity);
-            }
-        }
-
-        if (newStorageCount > 0)
-        {
-            if (array[newStorageCount - 1] == null)
-            {
-                array[newStorageCount - 1] = new T[newRemainder];
-            }
-            else
-            {
-                Array.Resize(ref array[newStorageCount - 1], newRemainder);
-            }
-        }
     }
 }

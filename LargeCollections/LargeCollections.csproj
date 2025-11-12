@@ -1,9 +1,9 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFrameworks>netstandard2.0;netstandard2.1;net6.0;net8.0</TargetFrameworks>
+    <TargetFrameworks>netstandard2.0;netstandard2.1;net6.0</TargetFrameworks>
     <PackageTags>
-      LargeCollection;LargeCollections;Large;Collection;Collections;LargeArray;LargeList;LargeSet;LargeDictionary;ReadOnlyLargeSpan;LargeSpan;Array;List;Set;Dictionary;Span;Concurrent;ConcurrentLargeArray;ConcurrentLargeList;ConcurrentLargeSet;ConcurrentLargeDictionary;LargeMemoryStream;Stream
+      LargeCollection;LargeCollections;Large;Collection;Collections;LargeArray;LargeList;LargeSet;LargeDictionary;ReadOnlyLargeSpan;LargeSpan;LargeLinkedList;Array;List;Set;Dictionary;Span;LinkedList;Concurrent;ConcurrentLargeArray;ConcurrentLargeList;ConcurrentLargeSet;ConcurrentLargeDictionary;LargeMemoryStream;Stream
     </PackageTags>
     <Description>Interfaces and types for large collections that can store up to 1_152_921_504_606_846_976
       items like arrays, lists, sets and dictionaries. (Many .NET standard collections are limited

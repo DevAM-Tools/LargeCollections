@@ -7,11 +7,16 @@ Currently supported collections are:
 - LargeArray<T>
 - LargeList<T>
 - LargeSet<T>
+- LargeLinkedList<T>
+- LargeSpan<T>
+- ReadOnlyLargeSpan<T>
 - LargeDictionary<TKey, TValue>
 - DiskCache<TKey, TValue>
 - SpatialDiskCache<long, TValue>
 - LargeObservableCollection<T>
 - ReadOnlyLargeObservableCollection<T>
+
+LargeSpan<T> and ReadOnlyLargeSpan<T> are inspired by Span<T> and ReadOnlySpan<T> to simplify slice handling. However this comes at a small performance cost due to additional range and index checks.
 
 DiskCache<TKey, TValue> is a dictionary-like collection that allows to limit the amount of memory (RAM) in MB that will be used.
 Any memory requirement that exceeds this amount is automatically swapped out to disk. 

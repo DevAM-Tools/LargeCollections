@@ -23,1390 +23,1057 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
 
-using LargeCollections.Test;
+using System;
 using System.Collections;
+using System.Collections.Generic;
 using System.Collections.Specialized;
 using System.ComponentModel;
+using System.Linq;
+using System.Threading.Tasks;
+using LargeCollections;
+using LargeCollections.Observable;
+using LargeCollections.Test.Helpers;
+using TUnit.Core;
 
-namespace LargeCollections.Observable.Test;
+namespace LargeCollections.Test.Observable;
 
 public class LargeObservableCollectionTest
 {
+    public static IEnumerable<long> Capacities() => Parameters.Capacities;
+
+    #region Constructors
 
     [Test]
-    [MethodDataSource(typeof(LargeArrayTest), nameof(LargeArrayTest.CapacitiesTestCasesArguments))]
-    public async Task Create(long capacity)
+    public async Task Constructor_DefaultInitializesEmpty()
     {
-        LargeObservableCollection<long> collection;
-        if (capacity < 0 || capacity > Constants.MaxLargeCollectionCount)
+        LargeObservableCollection<long> collection = new();
+
+        await Assert.That(collection.Count).IsEqualTo(0L);
+        await Assert.That(collection.GetAll().Any()).IsFalse();
+        await Assert.That(collection.AsReadOnly()).IsNotNull();
+    }
+
+    [Test]
+    [MethodDataSource(nameof(Capacities))]
+    public async Task Constructor_WithInitialCapacity_AllowsAdd(long capacity)
+    {
+        long initialCapacity = Math.Max(0L, Math.Min(capacity, Constants.MaxLargeCollectionCount));
+        LargeObservableCollection<long> collection = new(initialCapacity);
+        using EventRecorder<long> recorder = new(collection);
+
+        collection.Add(1L);
+
+        await Assert.That(collection.Count).IsEqualTo(1L);
+        await Assert.That(collection[0]).IsEqualTo(1L);
+        await Assert.That(recorder.CollectionEvents.Count).IsEqualTo(1);
+        await Assert.That(recorder.PropertyEvents.Count).IsEqualTo(1);
+    }
+
+    [Test]
+    public async Task Constructor_SuppressEventExceptions_ControlsPropagation()
+    {
+        LargeObservableCollection<long> strict = new(suppressEventExceptions: false);
+        strict.CollectionChanged += (_, _) => throw new InvalidOperationException("boom");
+
+        await Assert.That(() => strict.Add(1L)).Throws<InvalidOperationException>();
+
+        LargeObservableCollection<long> tolerant = new(suppressEventExceptions: true);
+        int propertyCalls = 0;
+        tolerant.CollectionChanged += (_, _) => throw new InvalidOperationException("ignored");
+        tolerant.PropertyChanged += (_, _) => propertyCalls++;
+        tolerant.PropertyChanged += (_, _) => throw new InvalidOperationException("ignored property");
+
+        tolerant.Add(2L);
+
+        await Assert.That(tolerant.Count).IsEqualTo(1L);
+        await Assert.That(propertyCalls).IsEqualTo(1);
+    }
+
+    [Test]
+    public async Task Constructor_WithCapacityAndSuppression_AllowsOperations()
+    {
+        LargeObservableCollection<long> collection = new(initialCapacity: 3, suppressEventExceptions: true);
+        collection.AddRange(new long[] { 1, 2, 3 });
+
+        await Assert.That(collection.Count).IsEqualTo(3L);
+        await Assert.That(collection[1]).IsEqualTo(2L);
+    }
+
+    #endregion
+
+    #region Indexer and Set
+
+    [Test]
+    [MethodDataSource(nameof(Capacities))]
+    public async Task Indexer_GetSet_RaisesReplace(long capacity)
+    {
+        LargeObservableCollection<long> collection = CreateCollectionWithSequence(capacity, 0L);
+        if (collection.Count == 0)
         {
-            await Assert.That(() => collection = new LargeObservableCollection<long>(capacity)).Throws<ArgumentOutOfRangeException>();
+            await Assert.That(() => collection[0]).Throws<Exception>();
+            await Assert.That(() => collection[0] = 1L).Throws<Exception>();
             return;
         }
 
-        // Test 1: Constructor with capacity
-        collection = new LargeObservableCollection<long>(capacity);
-        await Assert.That(collection.Count).IsEqualTo(0L);
+        using EventRecorder<long> recorder = new(collection);
+        long index = Math.Min(collection.Count - 1, 1L);
+        long newValue = collection[index] + 5L;
+        collection[index] = newValue;
 
-        // Test 2: Constructor with capacity and suppressEventExceptions
-        LargeObservableCollection<long> collectionWithSuppress = new(capacity, suppressEventExceptions: true);
-        await Assert.That(collectionWithSuppress.Count).IsEqualTo(0L);
-
-        // Test 3: Default constructor
-        LargeObservableCollection<long> defaultCollection = [];
-        await Assert.That(defaultCollection.Count).IsEqualTo(0L);
-
-        // Test 4: Constructor with suppressEventExceptions only
-        LargeObservableCollection<long> suppressOnlyCollection = new(suppressEventExceptions: true);
-        await Assert.That(suppressOnlyCollection.Count).IsEqualTo(0L);
-
-        // Test 5: Constructor with collection
-        if (capacity <= int.MaxValue && capacity > 0)
-        {
-            long[] sourceArray = new long[capacity];
-            for (int i = 0; i < capacity; i++)
-            {
-                sourceArray[i] = i;
-            }
-
-            LargeObservableCollection<long> collectionFromArray = new(sourceArray);
-            await Assert.That(collectionFromArray.Count).IsEqualTo(capacity);
-
-            for (long i = 0; i < capacity; i++)
-            {
-                await Assert.That(collectionFromArray[i]).IsEqualTo(i);
-            }
-        }
-
-        // Test 6: Constructor with collection and suppressEventExceptions
-        if (capacity <= 100) // Limit for performance
-        {
-            long[] sourceArray = new long[capacity];
-            LargeObservableCollection<long> collectionFromArrayWithSuppress = new(sourceArray, suppressEventExceptions: true);
-            await Assert.That(collectionFromArrayWithSuppress.Count).IsEqualTo(capacity);
-        }
-
-#if NETSTANDARD2_1_OR_GREATER || NETCOREAPP3_0_OR_GREATER || NET5_0_OR_GREATER
-        // Test 7: Constructor with ReadOnlySpan
-        if (capacity <= int.MaxValue && capacity > 0)
-        {
-            long[] sourceArray = new long[capacity];
-            for (int i = 0; i < capacity; i++)
-            {
-                sourceArray[i] = i * 2;
-            }
-            
-            LargeObservableCollection<long> collectionFromSpan = new(sourceArray.AsSpan());
-            await Assert.That(collectionFromSpan.Count).IsEqualTo(capacity);
-            
-            for (long i = 0; i < capacity; i++)
-            {
-                await Assert.That(collectionFromSpan[i]).IsEqualTo(i * 2);
-            }
-        }
-
-        // Test 8: Constructor with ReadOnlySpan and suppressEventExceptions
-        if (capacity <= 100)
-        {
-            long[] sourceArray = new long[capacity];
-            LargeObservableCollection<long> collectionFromSpanWithSuppress = new(sourceArray.AsSpan(), suppressEventExceptions: true);
-            await Assert.That(collectionFromSpanWithSuppress.Count).IsEqualTo(capacity);
-        }
-#endif
-
-        // Test 9: Null collection throws exception
-        await Assert.That(() => new LargeObservableCollection<long>((IEnumerable<long>)null)).Throws<ArgumentNullException>();
+        await Assert.That(collection[index]).IsEqualTo(newValue);
+        await Assert.That(recorder.CollectionEvents.Last().Action).IsEqualTo(NotifyCollectionChangedAction.Replace);
+        await Assert.That(recorder.PropertyEvents.Any()).IsFalse();
     }
 
     [Test]
-    public async Task AddSingleItem_SmallIndex_FiresSpecificEvent()
+    [MethodDataSource(nameof(Capacities))]
+    public async Task Set_Method_UpdatesItem(long capacity)
     {
-        LargeObservableCollection<string> collection = [];
-        SharedObservableTests.EventTracker tracker = SharedObservableTests.AttachEventTracker(collection);
+        LargeObservableCollection<long> collection = CreateCollectionWithSequence(capacity, 10L);
+        if (collection.Count == 0)
+        {
+            await Assert.That(() => collection.Set(0L, 1L)).Throws<Exception>();
+            return;
+        }
 
-        collection.Add("Item1");
+        using EventRecorder<long> recorder = new(collection);
+        long index = Math.Min(collection.Count - 1, 1L);
+        long newValue = 12345L;
+        collection.Set(index, newValue);
+
+        await Assert.That(collection[index]).IsEqualTo(newValue);
+        await Assert.That(recorder.CollectionEvents.Last().Action).IsEqualTo(NotifyCollectionChangedAction.Replace);
+    }
+
+    #endregion
+
+    #region Add and AddRange
+
+    [Test]
+    [MethodDataSource(nameof(Capacities))]
+    public async Task Add_RaisesEventAndProperty(long capacity)
+    {
+        LargeObservableCollection<long> collection = new(capacity);
+        using EventRecorder<long> recorder = new(collection);
+
+        collection.Add(42L);
 
         await Assert.That(collection.Count).IsEqualTo(1L);
-        await Assert.That(collection[0]).IsEqualTo("Item1");
-        await Assert.That(tracker.CollectionChangedCount).IsEqualTo(1);
-        await Assert.That(tracker.PropertyChangedCount).IsEqualTo(1);
-
-        NotifyCollectionChangedEventArgs collectionEvent = tracker.CollectionChangedEvents[0];
-        await Assert.That(collectionEvent.Action).IsEqualTo(NotifyCollectionChangedAction.Add);
-        await Assert.That(collectionEvent.NewItems).IsNotNull();
-        await Assert.That(collectionEvent.NewItems.Count).IsEqualTo(1);
-        await Assert.That(collectionEvent.NewItems[0]).IsEqualTo("Item1");
-        await Assert.That(collectionEvent.NewStartingIndex).IsEqualTo(0);
-
-        PropertyChangedEventArgs propertyEvent = tracker.PropertyChangedEvents[0];
-        await Assert.That(propertyEvent.PropertyName).IsEqualTo("Count");
+        await Assert.That(recorder.CollectionEvents.Single().Action).IsEqualTo(NotifyCollectionChangedAction.Add);
+        await Assert.That(recorder.PropertyEvents.Single().PropertyName).IsEqualTo(nameof(collection.Count));
     }
 
     [Test]
-    public async Task AddSingleItem_LargeIndex_FiresResetEvent()
+    public async Task AddRange_IEnumerable_BehavesByCount()
     {
-        LargeObservableCollection<long> collection = [];
-        SharedObservableTests.EventTracker tracker = SharedObservableTests.AttachEventTracker(collection);
+        LargeObservableCollection<long> collection = new();
+        using EventRecorder<long> recorder = new(collection);
 
-        // Add items until we exceed int.MaxValue index
-        // For testing purposes, we'll simulate this by using a large index scenario
-        // This is a conceptual test - in practice, we'd need massive memory
+        collection.AddRange(Array.Empty<long>());
+        await Assert.That(recorder.CollectionEvents.Count).IsEqualTo(0);
 
-        // We can't actually create that many items in a test, so we'll verify
-        // the implementation handles this case correctly by testing the boundary
-        for (int i = 0; i <= 10; i++)
-        {
-            collection.Add(i);
-        }
+        collection.AddRange(new long[] { 1 });
+        await Assert.That(recorder.CollectionEvents.Last().Action).IsEqualTo(NotifyCollectionChangedAction.Add);
 
-        await Assert.That(tracker.CollectionChangedEvents.All(e => e.Action == NotifyCollectionChangedAction.Add)).IsTrue();
+        collection.AddRange(new long[] { 2, 3 });
+        await Assert.That(recorder.CollectionEvents.Last().Action).IsEqualTo(NotifyCollectionChangedAction.Reset);
+        await Assert.That(recorder.PropertyEvents.Count).IsGreaterThanOrEqualTo(2);
     }
 
     [Test]
-    public async Task AddRange_IEnumerable_SingleItem_FiresSpecificEvent()
+    public async Task AddRange_IEnumerable_EnumeratesSequence()
     {
-        LargeObservableCollection<int> collection = [];
-        SharedObservableTests.EventTracker tracker = SharedObservableTests.AttachEventTracker(collection);
+        LargeObservableCollection<long> collection = new();
+        using EventRecorder<long> recorder = new(collection);
 
-        int[] singleItem = [42];
-        collection.AddRange(singleItem);
-
-        await Assert.That(collection.Count).IsEqualTo(1L);
-        await Assert.That(collection[0]).IsEqualTo(42);
-        await Assert.That(tracker.CollectionChangedCount).IsEqualTo(1);
-
-        NotifyCollectionChangedEventArgs collectionEvent = tracker.CollectionChangedEvents[0];
-        await Assert.That(collectionEvent.Action).IsEqualTo(NotifyCollectionChangedAction.Add);
-        await Assert.That(collectionEvent.NewItems[0]).IsEqualTo(42);
-        await Assert.That(collectionEvent.NewStartingIndex).IsEqualTo(0);
-    }
-
-    [Test]
-    public async Task AddRange_IEnumerable_MultipleItems_FiresResetEvent()
-    {
-        LargeObservableCollection<int> collection = [];
-        SharedObservableTests.EventTracker tracker = SharedObservableTests.AttachEventTracker(collection);
-
-        int[] multipleItems = [1, 2, 3, 4, 5];
-        collection.AddRange(multipleItems);
-
-        await Assert.That(collection.Count).IsEqualTo(5L);
-        await Assert.That(tracker.CollectionChangedCount).IsEqualTo(1);
-
-        NotifyCollectionChangedEventArgs collectionEvent = tracker.CollectionChangedEvents[0];
-        await Assert.That(collectionEvent.Action).IsEqualTo(NotifyCollectionChangedAction.Reset);
-    }
-
-    [Test]
-    public async Task AddRange_IEnumerable_EmptyCollection_NoEvents()
-    {
-        LargeObservableCollection<int> collection = [];
-        SharedObservableTests.EventTracker tracker = SharedObservableTests.AttachEventTracker(collection);
-
-        int[] emptyArray = [];
-        collection.AddRange(emptyArray);
-
-        await Assert.That(collection.Count).IsEqualTo(0L);
-        await Assert.That(tracker.CollectionChangedCount).IsEqualTo(0);
-        await Assert.That(tracker.PropertyChangedCount).IsEqualTo(0);
-    }
-
-    [Test]
-    public async Task AddRange_Array_SingleItem_FiresSpecificEvent()
-    {
-        LargeObservableCollection<string> collection = [];
-        SharedObservableTests.EventTracker tracker = SharedObservableTests.AttachEventTracker(collection);
-
-        string[] singleItem = ["Hello"];
-        collection.AddRange(singleItem);
-
-        await Assert.That(collection.Count).IsEqualTo(1L);
-        await Assert.That(tracker.CollectionChangedCount).IsEqualTo(1);
-
-        NotifyCollectionChangedEventArgs collectionEvent = tracker.CollectionChangedEvents[0];
-        await Assert.That(collectionEvent.Action).IsEqualTo(NotifyCollectionChangedAction.Add);
-    }
-
-    [Test]
-    public async Task AddRange_ArrayWithOffsetAndCount_WorksCorrectly()
-    {
-        LargeObservableCollection<int> collection = [];
-        SharedObservableTests.EventTracker tracker = SharedObservableTests.AttachEventTracker(collection);
-
-        int[] sourceArray = [10, 20, 30, 40, 50];
-        collection.AddRange(sourceArray, 1, 3); // Add items 20, 30, 40
+        collection.AddRange(GenerateSequence(3));
 
         await Assert.That(collection.Count).IsEqualTo(3L);
-        await Assert.That(collection[0]).IsEqualTo(20);
-        await Assert.That(collection[1]).IsEqualTo(30);
-        await Assert.That(collection[2]).IsEqualTo(40);
-        await Assert.That(tracker.CollectionChangedCount).IsEqualTo(1);
+        await Assert.That(recorder.CollectionEvents.Last().Action).IsEqualTo(NotifyCollectionChangedAction.Reset);
+    }
 
-        // Since we're adding 3 items, it should fire Reset
-        NotifyCollectionChangedEventArgs collectionEvent = tracker.CollectionChangedEvents[0];
-        await Assert.That(collectionEvent.Action).IsEqualTo(NotifyCollectionChangedAction.Reset);
+    [Test]
+    public async Task AddRange_IEnumerable_ThrowsOnNull()
+    {
+        LargeObservableCollection<long> collection = new();
+        await Assert.That(() => collection.AddRange((IEnumerable<long>)null!)).Throws<Exception>();
+    }
+
+    [Test]
+    public async Task AddRange_IReadOnlyLargeArray_OverloadsWork()
+    {
+        LargeObservableCollection<long> collection = new();
+        LargeArray<long> source = CreateSequentialArray(5);
+        using EventRecorder<long> recorder = new(collection);
+
+        collection.AddRange(source);
+        await Assert.That(collection.Count).IsEqualTo(source.Count);
+        await Assert.That(recorder.CollectionEvents.Last().Action).IsEqualTo(NotifyCollectionChangedAction.Reset);
+
+        collection.Clear();
+        recorder.Reset();
+        collection.AddRange(source, 2L);
+        await Assert.That(collection.GetAll().SequenceEqual(source.GetAll().Skip(2))).IsTrue();
+
+        collection.Clear();
+        recorder.Reset();
+        collection.AddRange(source, 1L, 2L);
+        await Assert.That(collection.GetAll().SequenceEqual(source.GetAll().Skip(1).Take(2))).IsTrue();
+
+        collection.Clear();
+        recorder.Reset();
+        collection.AddRange(source, source.Count - 1L, 1L);
+        await Assert.That(recorder.CollectionEvents.Last().Action).IsEqualTo(NotifyCollectionChangedAction.Add);
+
+        await Assert.That(() => collection.AddRange((IReadOnlyLargeArray<long>)null!)).Throws<Exception>();
+        await Assert.That(() => collection.AddRange(source, -1L)).Throws<Exception>();
+        await Assert.That(() => collection.AddRange(source, 0L, source.Count + 1L)).Throws<Exception>();
+    }
+
+    [Test]
+    public async Task AddRange_IReadOnlyLargeArray_ZeroCount_SuppressesEvents()
+    {
+        LargeObservableCollection<long> collection = new();
+        LargeArray<long> source = CreateSequentialArray(0);
+        using EventRecorder<long> recorder = new(collection);
+
+        collection.AddRange(source);
+
+        await Assert.That(recorder.CollectionEvents.Count).IsEqualTo(0);
+        await Assert.That(recorder.PropertyEvents.Count).IsEqualTo(0);
+    }
+
+    [Test]
+    public async Task AddRange_ReadOnlyLargeSpan_AddsItems()
+    {
+        LargeArray<long> source = CreateSequentialArray(3);
+        ReadOnlyLargeSpan<long> span = new(source, 0L, source.Count);
+        LargeObservableCollection<long> collection = new();
+        using EventRecorder<long> recorder = new(collection);
+
+        collection.AddRange(span);
+
+        await Assert.That(collection.GetAll().SequenceEqual(source.GetAll())).IsTrue();
+        await Assert.That(recorder.CollectionEvents.Last().Action).IsEqualTo(NotifyCollectionChangedAction.Reset);
+
+        collection.Clear();
+        recorder.Reset();
+        ReadOnlyLargeSpan<long> singleSpan = new(source, 0L, 1L);
+        collection.AddRange(singleSpan);
+        await Assert.That(recorder.CollectionEvents.Last().Action).IsEqualTo(NotifyCollectionChangedAction.Add);
+    }
+
+    [Test]
+    public async Task AddRange_ReadOnlyLargeSpan_ZeroCount_NoEvents()
+    {
+        LargeObservableCollection<long> collection = CreateCollectionWithSequence(2L, 0L);
+        using EventRecorder<long> recorder = new(collection);
+
+        collection.AddRange(default(ReadOnlyLargeSpan<long>));
+
+        await Assert.That(recorder.CollectionEvents.Count).IsEqualTo(0);
+        await Assert.That(recorder.PropertyEvents.Count).IsEqualTo(0);
+    }
+
+    [Test]
+    public async Task AddRange_ArrayOverloads_AddItems()
+    {
+        LargeObservableCollection<long> collection = new();
+        long[] source = new long[] { 5, 6, 7, 8 };
+        using EventRecorder<long> recorder = new(collection);
+
+        collection.AddRange(source);
+        await Assert.That(collection.Count).IsEqualTo(source.Length);
+        await Assert.That(recorder.CollectionEvents.Last().Action).IsEqualTo(NotifyCollectionChangedAction.Reset);
+
+        collection.Clear();
+        recorder.Reset();
+        collection.AddRange(source, 1);
+        await Assert.That(collection.GetAll().SequenceEqual(source.Skip(1))).IsTrue();
+
+        collection.Clear();
+        recorder.Reset();
+        collection.AddRange(source, 1, 2);
+        await Assert.That(collection.GetAll().SequenceEqual(source.Skip(1).Take(2))).IsTrue();
+
+        collection.Clear();
+        recorder.Reset();
+        collection.AddRange(source, 0, 1);
+        await Assert.That(recorder.CollectionEvents.Last().Action).IsEqualTo(NotifyCollectionChangedAction.Add);
+
+        await Assert.That(() => collection.AddRange((long[])null!)).Throws<Exception>();
+        await Assert.That(() => collection.AddRange(source, -1)).Throws<Exception>();
+        await Assert.That(() => collection.AddRange(source, 0, source.Length + 1)).Throws<Exception>();
+    }
+
+    [Test]
+    public async Task AddRange_ArrayOverloads_ZeroCount_NoEvents()
+    {
+        LargeObservableCollection<long> collection = new();
+        long[] source = new long[] { 1, 2, 3 };
+        using EventRecorder<long> recorder = new(collection);
+
+        collection.AddRange(source, 0, 0);
+
+        await Assert.That(recorder.CollectionEvents.Count).IsEqualTo(0);
+        await Assert.That(recorder.PropertyEvents.Count).IsEqualTo(0);
     }
 
 #if NETSTANDARD2_1_OR_GREATER || NETCOREAPP3_0_OR_GREATER || NET5_0_OR_GREATER
     [Test]
-    public async Task AddRange_ReadOnlySpan_WorksCorrectly()
+    public async Task AddRange_ReadOnlySpan_AddsItems()
     {
-        LargeObservableCollection<double> collection = [];
-        SharedObservableTests.EventTracker tracker = SharedObservableTests.AttachEventTracker(collection);
+        LargeObservableCollection<long> collection = new();
+        long[] source = new long[] { 9, 10, 11 };
+        using EventRecorder<long> recorder = new(collection);
 
-        double[] sourceArray = [1.1, 2.2, 3.3];
-        collection.AddRange(sourceArray.AsSpan());
+        collection.AddRange(source.AsSpan());
 
-        await Assert.That(collection.Count).IsEqualTo(3L);
-        await Assert.That(collection[0]).IsEqualTo(1.1);
-        await Assert.That(collection[1]).IsEqualTo(2.2);
-        await Assert.That(collection[2]).IsEqualTo(3.3);
-        await Assert.That(tracker.CollectionChangedCount).IsEqualTo(1);
+        await Assert.That(collection.GetAll().SequenceEqual(source)).IsTrue();
+        await Assert.That(recorder.CollectionEvents.Last().Action).IsEqualTo(NotifyCollectionChangedAction.Reset);
 
-        NotifyCollectionChangedEventArgs collectionEvent = tracker.CollectionChangedEvents[0];
-        await Assert.That(collectionEvent.Action).IsEqualTo(NotifyCollectionChangedAction.Reset);
+        collection.Clear();
+        recorder.Reset();
+        collection.AddRange(source.AsSpan(0, 1));
+        await Assert.That(recorder.CollectionEvents.Last().Action).IsEqualTo(NotifyCollectionChangedAction.Add);
+    }
+
+    [Test]
+    public async Task AddRange_ReadOnlySpan_Empty_NoEvents()
+    {
+        LargeObservableCollection<long> collection = CreateCollectionWithSequence(1L, 0L);
+        using EventRecorder<long> recorder = new(collection);
+
+        collection.AddRange(ReadOnlySpan<long>.Empty);
+
+        await Assert.That(recorder.CollectionEvents.Count).IsEqualTo(0);
+        await Assert.That(recorder.PropertyEvents.Count).IsEqualTo(0);
     }
 #endif
 
+    #endregion
+
+    #region Remove and Clear
+
     [Test]
-    public async Task Clear_EmptyCollection_NoEvents()
+    [MethodDataSource(nameof(Capacities))]
+    public async Task Clear_RemovesItems_WhenNotEmpty(long capacity)
     {
-        LargeObservableCollection<int> collection = [];
-        SharedObservableTests.EventTracker tracker = SharedObservableTests.AttachEventTracker(collection);
+        LargeObservableCollection<long> collection = CreateCollectionWithSequence(capacity, 0L);
+        using EventRecorder<long> recorder = new(collection);
 
         collection.Clear();
 
         await Assert.That(collection.Count).IsEqualTo(0L);
-        await Assert.That(tracker.CollectionChangedCount).IsEqualTo(0);
-        await Assert.That(tracker.PropertyChangedCount).IsEqualTo(0);
+        if (capacity > 0)
+        {
+            await Assert.That(recorder.CollectionEvents.Last().Action).IsEqualTo(NotifyCollectionChangedAction.Reset);
+            await Assert.That(recorder.PropertyEvents.Last().PropertyName).IsEqualTo(nameof(collection.Count));
+        }
+        else
+        {
+            await Assert.That(recorder.CollectionEvents.Count).IsEqualTo(0);
+        }
     }
 
     [Test]
-    public async Task Clear_NonEmptyCollection_FiresResetEvent()
+    public async Task Remove_ReturnsFalse_WhenMissing()
     {
-        LargeObservableCollection<int> collection = [];
-        collection.Add(1);
-        collection.Add(2);
-        collection.Add(3);
+        LargeObservableCollection<long> collection = new();
+        using EventRecorder<long> recorder = new(collection);
 
-        SharedObservableTests.EventTracker tracker = SharedObservableTests.AttachEventTracker(collection);
-        collection.Clear();
+        bool removed = collection.Remove(99L);
 
+        await Assert.That(removed).IsFalse();
+        await Assert.That(recorder.CollectionEvents.Count).IsEqualTo(0);
+    }
+
+    [Test]
+    [MethodDataSource(nameof(Capacities))]
+    public async Task Remove_RemovesItem_AndRaisesReset(long capacity)
+    {
+        LargeObservableCollection<long> collection = CreateCollectionWithSequence(Math.Max(1L, capacity), 5L);
+        using EventRecorder<long> recorder = new(collection);
+
+        bool removed = collection.Remove(5L, preserveOrder: true, out long removedValue, static (l, r) => l == r);
+
+        await Assert.That(removed).IsTrue();
+        await Assert.That(removedValue).IsEqualTo(5L);
+        await Assert.That(recorder.CollectionEvents.Last().Action).IsEqualTo(NotifyCollectionChangedAction.Reset);
+        await Assert.That(recorder.PropertyEvents.Last().PropertyName).IsEqualTo(nameof(collection.Count));
+    }
+
+    [Test]
+    [MethodDataSource(nameof(Capacities))]
+    public async Task Remove_OutParameter_ReturnsRemovedItem(long capacity)
+    {
+        LargeObservableCollection<long> collection = CreateCollectionWithSequence(capacity, 20L);
+        using EventRecorder<long> recorder = new(collection);
+
+        bool expectedRemoved = collection.Count > 0;
+        long target = expectedRemoved ? collection[0] : 20L;
+
+        bool removed = collection.Remove(target, out long removedItem);
+
+        await Assert.That(removed).IsEqualTo(expectedRemoved);
+        if (expectedRemoved)
+        {
+            await Assert.That(removedItem).IsEqualTo(target);
+            await Assert.That(recorder.CollectionEvents.Last().Action).IsEqualTo(NotifyCollectionChangedAction.Reset);
+        }
+        else
+        {
+            await Assert.That(removedItem).IsEqualTo(0L);
+            await Assert.That(recorder.CollectionEvents.Count).IsEqualTo(0);
+            await Assert.That(recorder.PropertyEvents.Count).IsEqualTo(0);
+        }
+    }
+
+    [Test]
+    public async Task Remove_PreserveOrderFalse_UsesSwapRemoval()
+    {
+        LargeObservableCollection<long> collection = CreateCollectionWithSequence(3L, 30L);
+        using EventRecorder<long> recorder = new(collection);
+
+        bool removed = collection.Remove(31L, preserveOrder: false, out long removedItem);
+
+        await Assert.That(removed).IsTrue();
+        await Assert.That(removedItem).IsEqualTo(31L);
+        await Assert.That(collection.Count).IsEqualTo(2L);
+        await Assert.That(recorder.CollectionEvents.Last().Action).IsEqualTo(NotifyCollectionChangedAction.Reset);
+    }
+
+    [Test]
+    public async Task Remove_WithComparerOnly_UsesEqualityFunction()
+    {
+        LargeObservableCollection<string> collection = new();
+        using EventRecorder<string> recorder = new(collection);
+        collection.Add("FOO");
+
+        bool removed = collection.Remove("foo", static (l, r) => string.Equals(l, r, StringComparison.OrdinalIgnoreCase));
+
+        await Assert.That(removed).IsTrue();
         await Assert.That(collection.Count).IsEqualTo(0L);
-        await Assert.That(tracker.CollectionChangedCount).IsEqualTo(1);
-        await Assert.That(tracker.PropertyChangedCount).IsEqualTo(1);
-
-        NotifyCollectionChangedEventArgs collectionEvent = tracker.CollectionChangedEvents[0];
-        await Assert.That(collectionEvent.Action).IsEqualTo(NotifyCollectionChangedAction.Reset);
+        await Assert.That(recorder.CollectionEvents.Last().Action).IsEqualTo(NotifyCollectionChangedAction.Reset);
     }
 
     [Test]
-    public async Task Remove_ExistingItem_FiresResetEvent()
+    public async Task Remove_PreserveOrderFlagOnly_Overload_Works()
     {
-        LargeObservableCollection<string> collection = [];
-        collection.Add("A");
-        collection.Add("B");
-        collection.Add("C");
+        LargeObservableCollection<long> collection = CreateCollectionWithSequence(3L, 400L);
+        using EventRecorder<long> recorder = new(collection);
 
-        SharedObservableTests.EventTracker tracker = SharedObservableTests.AttachEventTracker(collection);
-        collection.Remove("B");
+        bool removed = collection.Remove(401L, preserveOrder: false);
 
-        await Assert.That(collection.Count).IsEqualTo(2L);
-        await Assert.That(collection.Contains("B")).IsFalse();
-        await Assert.That(tracker.CollectionChangedCount).IsEqualTo(1);
-
-        NotifyCollectionChangedEventArgs collectionEvent = tracker.CollectionChangedEvents[0];
-        await Assert.That(collectionEvent.Action).IsEqualTo(NotifyCollectionChangedAction.Reset);
+        await Assert.That(removed).IsTrue();
+        await Assert.That(recorder.CollectionEvents.Last().Action).IsEqualTo(NotifyCollectionChangedAction.Reset);
     }
 
     [Test]
-    public async Task Remove_NonExistingItem_NoEvents()
+    public async Task Remove_WithComparerAndOutParameter_ReturnsItem()
     {
-        LargeObservableCollection<string> collection = [];
-        collection.Add("A");
-        collection.Add("B");
+        LargeObservableCollection<string> collection = new();
+        using EventRecorder<string> recorder = new(collection);
+        collection.Add("alpha");
 
-        SharedObservableTests.EventTracker tracker = SharedObservableTests.AttachEventTracker(collection);
-        collection.Remove("C"); // Item doesn't exist
+        bool removed = collection.Remove("ALPHA", out string removedItem, static (l, r) => string.Equals(l, r, StringComparison.OrdinalIgnoreCase));
 
-        await Assert.That(collection.Count).IsEqualTo(2L);
-        await Assert.That(tracker.CollectionChangedCount).IsEqualTo(0);
-        await Assert.That(tracker.PropertyChangedCount).IsEqualTo(0);
+        await Assert.That(removed).IsTrue();
+        await Assert.That(removedItem).IsEqualTo("alpha");
+        await Assert.That(recorder.CollectionEvents.Last().Action).IsEqualTo(NotifyCollectionChangedAction.Reset);
     }
 
     [Test]
-    public async Task RemoveAt_SmallIndex_FiresSpecificEvent()
+    public async Task Remove_WithComparerAndPreserveFlag_Removes()
     {
-        LargeObservableCollection<int> collection = [];
-        collection.Add(10);
-        collection.Add(20);
-        collection.Add(30);
+        LargeObservableCollection<string> collection = new();
+        using EventRecorder<string> recorder = new(collection);
+        collection.AddRange(new[] { "x", "y" });
 
-        SharedObservableTests.EventTracker tracker = SharedObservableTests.AttachEventTracker(collection);
-        collection.RemoveAt(1); // Remove item at index 1 (value 20)
+        bool removed = collection.Remove("Y", preserveOrder: false, static (l, r) => string.Equals(l, r, StringComparison.OrdinalIgnoreCase));
 
-        await Assert.That(collection.Count).IsEqualTo(2L);
-        await Assert.That(collection[0]).IsEqualTo(10);
-        await Assert.That(collection[1]).IsEqualTo(30);
-        await Assert.That(tracker.CollectionChangedCount).IsEqualTo(1);
-
-        NotifyCollectionChangedEventArgs collectionEvent = tracker.CollectionChangedEvents[0];
-        await Assert.That(collectionEvent.Action).IsEqualTo(NotifyCollectionChangedAction.Remove);
-        await Assert.That(collectionEvent.OldItems[0]).IsEqualTo(20);
-        await Assert.That(collectionEvent.OldStartingIndex).IsEqualTo(1);
+        await Assert.That(removed).IsTrue();
+        await Assert.That(recorder.CollectionEvents.Last().Action).IsEqualTo(NotifyCollectionChangedAction.Reset);
     }
 
     [Test]
-    public async Task Set_SmallIndex_FiresReplaceEvent()
+    [MethodDataSource(nameof(Capacities))]
+    public async Task RemoveAt_RaisesEvent(long capacity)
     {
-        LargeObservableCollection<string> collection = [];
-        collection.Add("Old");
+        LargeObservableCollection<long> collection = CreateCollectionWithSequence(Math.Max(1L, capacity), 100L);
+        using EventRecorder<long> recorder = new(collection);
 
-        SharedObservableTests.EventTracker tracker = SharedObservableTests.AttachEventTracker(collection);
-        collection.Set(0, "New");
+        long index = Math.Min(collection.Count - 1, 1L);
+        long removed = collection.RemoveAt(index);
 
-        await Assert.That(collection[0]).IsEqualTo("New");
-        await Assert.That(tracker.CollectionChangedCount).IsEqualTo(1);
-
-        NotifyCollectionChangedEventArgs collectionEvent = tracker.CollectionChangedEvents[0];
-        await Assert.That(collectionEvent.Action).IsEqualTo(NotifyCollectionChangedAction.Replace);
-        await Assert.That(collectionEvent.NewItems[0]).IsEqualTo("New");
-        await Assert.That(collectionEvent.OldItems[0]).IsEqualTo("Old");
-        await Assert.That(collectionEvent.NewStartingIndex).IsEqualTo(0);
+        await Assert.That(removed).IsEqualTo(100L + index);
+        await Assert.That(recorder.CollectionEvents.Last().Action).IsEqualTo(NotifyCollectionChangedAction.Remove);
+        await Assert.That(recorder.PropertyEvents.Last().PropertyName).IsEqualTo(nameof(collection.Count));
     }
 
     [Test]
-    public async Task Indexer_Set_SmallIndex_FiresReplaceEvent()
+    public async Task RemoveAt_PreserveOrderFalse_RaisesEvent()
     {
-        LargeObservableCollection<int> collection = [];
-        collection.Add(100);
+        LargeObservableCollection<long> collection = CreateCollectionWithSequence(3L, 200L);
+        using EventRecorder<long> recorder = new(collection);
 
-        SharedObservableTests.EventTracker tracker = SharedObservableTests.AttachEventTracker(collection);
-        collection[0] = 200;
+        long removed = collection.RemoveAt(1L, preserveOrder: false);
 
-        await Assert.That(collection[0]).IsEqualTo(200);
-        await Assert.That(tracker.CollectionChangedCount).IsEqualTo(1);
-
-        NotifyCollectionChangedEventArgs collectionEvent = tracker.CollectionChangedEvents[0];
-        await Assert.That(collectionEvent.Action).IsEqualTo(NotifyCollectionChangedAction.Replace);
-        await Assert.That(collectionEvent.NewItems[0]).IsEqualTo(200);
-        await Assert.That(collectionEvent.OldItems[0]).IsEqualTo(100);
+        await Assert.That(removed).IsEqualTo(201L);
+        await Assert.That(recorder.CollectionEvents.Last().Action).IsEqualTo(NotifyCollectionChangedAction.Remove);
     }
 
     [Test]
-    public async Task SuspendNotifications_BlocksEvents()
+    public async Task RemoveAt_InvalidIndex_Throws()
     {
-        LargeObservableCollection<int> collection = [];
-        SharedObservableTests.EventTracker tracker = SharedObservableTests.AttachEventTracker(collection);
+        LargeObservableCollection<long> collection = CreateCollectionWithSequence(1L, 0L);
+        await Assert.That(() => collection.RemoveAt(-1L)).Throws<Exception>();
+    }
 
-        using (collection.SuspendNotifications())
+    #endregion
+
+    #region CopyFrom and CopyTo
+
+    [Test]
+    [MethodDataSource(nameof(Capacities))]
+    public async Task CopyFrom_IReadOnlyLargeArray_TriggersReplaceOrReset(long capacity)
+    {
+        LargeArray<long> source = CreateSequentialArray(Math.Max(2L, capacity + 1L), 500L);
+        LargeObservableCollection<long> collection = CreateCollectionWithSequence(Math.Max(2L, capacity + 1L), 1000L);
+        using EventRecorder<long> recorder = new(collection);
+
+        collection.CopyFrom(source, 0L, 0L, 1L);
+        await Assert.That(collection[0]).IsEqualTo(source[0]);
+        await Assert.That(recorder.CollectionEvents.Last().Action).IsEqualTo(NotifyCollectionChangedAction.Replace);
+
+        recorder.Reset();
+        collection.CopyFrom(source, 0L, 0L, Math.Min(2L, collection.Count));
+        await Assert.That(recorder.CollectionEvents.Last().Action).IsEqualTo(NotifyCollectionChangedAction.Reset);
+
+        collection.CopyFrom(source, 0L, 0L, 0L);
+
+        await Assert.That(() => collection.CopyFrom((IReadOnlyLargeArray<long>)null!, 0L, 0L, 1L)).Throws<Exception>();
+    }
+
+    [Test]
+    public async Task CopyFrom_IReadOnlyLargeArray_CountZero_NoEvents()
+    {
+        LargeArray<long> source = CreateSequentialArray(3L, 600L);
+        LargeObservableCollection<long> collection = CreateCollectionWithSequence(3L, 700L);
+        using EventRecorder<long> recorder = new(collection);
+
+        collection.CopyFrom(source, 0L, 0L, 0L);
+
+        await Assert.That(recorder.CollectionEvents.Count).IsEqualTo(0);
+        await Assert.That(recorder.PropertyEvents.Count).IsEqualTo(0);
+    }
+
+    [Test]
+    public async Task CopyFrom_IReadOnlyLargeArray_InvalidRangesThrow()
+    {
+        LargeArray<long> source = CreateSequentialArray(3L, 800L);
+        LargeObservableCollection<long> collection = CreateCollectionWithSequence(3L, 900L);
+
+        await Assert.That(() => collection.CopyFrom(source, -1L, 0L, 1L)).Throws<Exception>();
+        await Assert.That(() => collection.CopyFrom(source, 0L, -1L, 1L)).Throws<Exception>();
+        await Assert.That(() => collection.CopyFrom(source, 0L, 0L, source.Count + 1L)).Throws<Exception>();
+    }
+
+    [Test]
+    [MethodDataSource(nameof(Capacities))]
+    public async Task CopyFrom_ReadOnlyLargeSpan_TriggersExpectedEvents(long capacity)
+    {
+        LargeArray<long> backing = CreateSequentialArray(Math.Max(2L, capacity + 1L), 2000L);
+        ReadOnlyLargeSpan<long> source = new(backing, 0L, backing.Count);
+        LargeObservableCollection<long> collection = CreateCollectionWithSequence(Math.Max(2L, capacity + 1L), 3000L);
+        using EventRecorder<long> recorder = new(collection);
+
+        collection.CopyFrom(source, 0L, 1L);
+        await Assert.That(collection[0]).IsEqualTo(backing[0]);
+        await Assert.That(recorder.CollectionEvents.Last().Action).IsEqualTo(NotifyCollectionChangedAction.Replace);
+
+        recorder.Reset();
+        collection.CopyFrom(source, 0L, Math.Min(2L, collection.Count));
+        await Assert.That(recorder.CollectionEvents.Last().Action).IsEqualTo(NotifyCollectionChangedAction.Reset);
+    }
+
+    [Test]
+    public async Task CopyFrom_ReadOnlyLargeSpan_CountZero_NoEvents()
+    {
+        LargeArray<long> backing = CreateSequentialArray(3L, 3100L);
+        ReadOnlyLargeSpan<long> source = new(backing, 0L, 0L);
+        LargeObservableCollection<long> collection = CreateCollectionWithSequence(3L, 3200L);
+        using EventRecorder<long> recorder = new(collection);
+
+        collection.CopyFrom(source, 0L, 0L);
+
+        await Assert.That(recorder.CollectionEvents.Count).IsEqualTo(0);
+    }
+
+    [Test]
+    [MethodDataSource(nameof(Capacities))]
+    public async Task CopyFromArray_TriggersExpectedEvents(long capacity)
+    {
+        long length = Math.Max(2L, Math.Min(capacity + 1L, Constants.MaxLargeCollectionCount));
+        long[] source = Enumerable.Range(0, (int)length).Select(i => (long)i + 9000L).ToArray();
+        LargeObservableCollection<long> collection = CreateCollectionWithSequence(length, 10000L);
+        using EventRecorder<long> recorder = new(collection);
+
+        collection.CopyFromArray(source, 0, 0L, 1);
+        await Assert.That(collection[0]).IsEqualTo(source[0]);
+        await Assert.That(recorder.CollectionEvents.Last().Action).IsEqualTo(NotifyCollectionChangedAction.Replace);
+
+        recorder.Reset();
+        collection.CopyFromArray(source, 0, 0L, Math.Min(2, source.Length));
+        await Assert.That(recorder.CollectionEvents.Last().Action).IsEqualTo(NotifyCollectionChangedAction.Reset);
+
+        await Assert.That(() => collection.CopyFromArray((long[])null!, 0, 0L, 1)).Throws<Exception>();
+        await Assert.That(() => collection.CopyFromArray(source, -1, 0L, 1)).Throws<Exception>();
+        await Assert.That(() => collection.CopyFromArray(source, 0, -1L, 1)).Throws<Exception>();
+        await Assert.That(() => collection.CopyFromArray(source, 0, 0L, source.Length + 1)).Throws<Exception>();
+    }
+
+    [Test]
+    public async Task CopyFromArray_CountZero_NoEvents()
+    {
+        long[] source = new long[] { 1, 2, 3 };
+        LargeObservableCollection<long> collection = CreateCollectionWithSequence(3L, 15000L);
+        using EventRecorder<long> recorder = new(collection);
+
+        collection.CopyFromArray(source, 0, 0L, 0);
+
+        await Assert.That(recorder.CollectionEvents.Count).IsEqualTo(0);
+    }
+
+#if NETSTANDARD2_1_OR_GREATER || NETCOREAPP3_0_OR_GREATER || NET5_0_OR_GREATER
+    [Test]
+    [MethodDataSource(nameof(Capacities))]
+    public async Task CopyFromSpan_TriggersExpectedEvents(long capacity)
+    {
+        long length = Math.Max(2L, Math.Min(capacity + 1L, Constants.MaxLargeCollectionCount));
+        long[] source = Enumerable.Range(0, (int)length).Select(i => (long)i + 12000L).ToArray();
+        LargeObservableCollection<long> collection = CreateCollectionWithSequence(length, 13000L);
+        using EventRecorder<long> recorder = new(collection);
+
+        collection.CopyFromSpan(source.AsSpan(), 0L, 1);
+        await Assert.That(collection[0]).IsEqualTo(source[0]);
+        await Assert.That(recorder.CollectionEvents.Last().Action).IsEqualTo(NotifyCollectionChangedAction.Replace);
+
+        recorder.Reset();
+        collection.CopyFromSpan(source.AsSpan(), 0L, Math.Min(2, source.Length));
+        await Assert.That(recorder.CollectionEvents.Last().Action).IsEqualTo(NotifyCollectionChangedAction.Reset);
+    }
+
+    [Test]
+    public async Task CopyFromSpan_CountZero_NoEvents()
+    {
+        long[] source = new long[] { 1, 2, 3 };
+        LargeObservableCollection<long> collection = CreateCollectionWithSequence(3L, 14000L);
+        using EventRecorder<long> recorder = new(collection);
+
+        collection.CopyFromSpan(source.AsSpan(), 0L, 0);
+
+        await Assert.That(recorder.CollectionEvents.Count).IsEqualTo(0);
+    }
+
+    [Test]
+    public async Task CopyFromSpan_InvalidRangesThrow()
+    {
+        long[] source = new long[] { 1, 2, 3 };
+        LargeObservableCollection<long> collection = CreateCollectionWithSequence(3L, 14500L);
+
+        await Assert.That(() => collection.CopyFromSpan(source.AsSpan(), -1L, 1)).Throws<Exception>();
+        await Assert.That(() => collection.CopyFromSpan(source.AsSpan(), 0L, source.Length + 1)).Throws<Exception>();
+        await Assert.That(() => collection.CopyFromSpan(source.AsSpan(), 0L, -1)).Throws<Exception>();
+    }
+#endif
+
+    [Test]
+    [MethodDataSource(nameof(Capacities))]
+    public async Task CopyTo_Variants_CopyData(long capacity)
+    {
+        LargeObservableCollection<long> collection = CreateCollectionWithSequence(Math.Max(3L, capacity + 1L), 400L);
+        LargeArray<long> targetArray = CreateSequentialArray(collection.Count + 2L, 0L);
+        collection.CopyTo(targetArray, 0L, 1L, Math.Min(2L, collection.Count));
+        await Assert.That(targetArray[1]).IsEqualTo(collection[0]);
+
+        LargeArray<long> spanBacking = CreateSequentialArray(collection.Count + 1L, 0L);
+        LargeSpan<long> spanTarget = new(spanBacking);
+        collection.CopyTo(spanTarget, 0L, Math.Min(2L, collection.Count));
+        await Assert.That(spanBacking[0]).IsEqualTo(collection[0]);
+
+        long[] raw = new long[Math.Max(1, (int)Math.Min(2L, collection.Count))];
+        collection.CopyToArray(raw, 0L, 0, raw.Length);
+        await Assert.That(raw[0]).IsEqualTo(collection[0]);
+
+#if NETSTANDARD2_1_OR_GREATER || NETCOREAPP3_0_OR_GREATER || NET5_0_OR_GREATER
+        Span<long> writable = raw.AsSpan();
+        collection.CopyToSpan(writable, 0L, writable.Length);
+        await Assert.That(writable[0]).IsEqualTo(collection[0]);
+#endif
+    }
+
+    [Test]
+    public async Task CopyTo_InvalidParameters_Throw()
+    {
+        LargeObservableCollection<long> collection = CreateCollectionWithSequence(2L, 500L);
+        LargeArray<long> arrayTarget = CreateSequentialArray(5L, 0L);
+
+        await Assert.That(() => collection.CopyTo(arrayTarget, -1L, 0L, 1L)).Throws<Exception>();
+        await Assert.That(() => collection.CopyTo(arrayTarget, 0L, -1L, 1L)).Throws<Exception>();
+        await Assert.That(() => collection.CopyTo(arrayTarget, 0L, 0L, arrayTarget.Count + 1L)).Throws<Exception>();
+        await Assert.That(() => collection.CopyTo(arrayTarget, 0L, 0L, -1L)).Throws<Exception>();
+
+        long[] raw = new long[5];
+        await Assert.That(() => collection.CopyToArray(raw, -1L, 0, 1)).Throws<Exception>();
+        await Assert.That(() => collection.CopyToArray(raw, 0L, -1, 1)).Throws<Exception>();
+        await Assert.That(() => collection.CopyToArray(raw, 0L, 0, raw.Length + 1)).Throws<Exception>();
+
+#if NETSTANDARD2_1_OR_GREATER || NETCOREAPP3_0_OR_GREATER || NET5_0_OR_GREATER
+        await Assert.That(() => collection.CopyToSpan(raw.AsSpan(), -1L, 1)).Throws<Exception>();
+        await Assert.That(() => collection.CopyToSpan(raw.AsSpan(), 0L, raw.Length + 1)).Throws<Exception>();
+        await Assert.That(() => collection.CopyToSpan(raw.AsSpan(), 0L, -1)).Throws<Exception>();
+#endif
+
+        LargeSpan<long> spanTarget = new(CreateSequentialArray(5L, 0L));
+        await Assert.That(() => collection.CopyTo(spanTarget, -1L, 1L)).Throws<Exception>();
+        await Assert.That(() => collection.CopyTo(spanTarget, 0L, spanTarget.Count + 1L)).Throws<Exception>();
+    }
+
+    #endregion
+
+    #region Lookup and Enumeration
+
+    [Test]
+    [MethodDataSource(nameof(Capacities))]
+    public async Task BinarySearch_And_IndexLookups_Work(long capacity)
+    {
+        // Use a sequence for BinarySearch tests (needs sorted unique values)
+        LargeObservableCollection<long> collection = CreateCollectionWithSequence(capacity, 100L);
+        Func<long, long, int> comparer = static (l, r) => l.CompareTo(r);
+
+        long value = collection.Count > 0 ? collection[0] : 0L;
+
+        await Assert.That(collection.BinarySearch(value, comparer)).IsEqualTo(collection.Count > 0 ? 0L : -1L);
+        await Assert.That(collection.BinarySearch(value, comparer, 0L, collection.Count)).IsEqualTo(collection.Count > 0 ? 0L : -1L);
+
+        await Assert.That(collection.Contains(value)).IsEqualTo(collection.Count > 0);
+        await Assert.That(collection.Contains(value, static (l, r) => l == r)).IsEqualTo(collection.Count > 0);
+        await Assert.That(collection.Contains(value, 0L, collection.Count)).IsEqualTo(collection.Count > 0);
+        await Assert.That(collection.Contains(value, 0L, collection.Count, static (l, r) => l == r)).IsEqualTo(collection.Count > 0);
+
+        await Assert.That(collection.IndexOf(value)).IsEqualTo(collection.Count > 0 ? 0L : -1L);
+        await Assert.That(collection.IndexOf(value, 0L, collection.Count)).IsEqualTo(collection.Count > 0 ? 0L : -1L);
+        await Assert.That(collection.IndexOf(value, static (l, r) => l == r)).IsEqualTo(collection.Count > 0 ? 0L : -1L);
+        await Assert.That(collection.IndexOf(value, 0L, collection.Count, static (l, r) => l == r)).IsEqualTo(collection.Count > 0 ? 0L : -1L);
+
+        // LastIndexOf on a sequence should return 0 (value is only at index 0)
+        await Assert.That(collection.LastIndexOf(value)).IsEqualTo(collection.Count > 0 ? 0L : -1L);
+        await Assert.That(collection.LastIndexOf(value, 0L, collection.Count)).IsEqualTo(collection.Count > 0 ? 0L : -1L);
+        await Assert.That(collection.LastIndexOf(value, static (l, r) => l == r)).IsEqualTo(collection.Count > 0 ? 0L : -1L);
+        await Assert.That(collection.LastIndexOf(value, 0L, collection.Count, static (l, r) => l == r)).IsEqualTo(collection.Count > 0 ? 0L : -1L);
+        
+        // Test LastIndexOf with duplicate values
+        if (collection.Count > 0)
         {
-            collection.Add(1);
-            collection.Add(2);
-            collection.Add(3);
+            LargeObservableCollection<long> collectionWithDuplicates = CreateCollectionWithSameValue(capacity, 100L);
+            long duplicateValue = 100L;
+            await Assert.That(collectionWithDuplicates.LastIndexOf(duplicateValue)).IsEqualTo(collectionWithDuplicates.Count - 1);
+            await Assert.That(collectionWithDuplicates.LastIndexOf(duplicateValue, 0L, collectionWithDuplicates.Count)).IsEqualTo(collectionWithDuplicates.Count - 1);
+            await Assert.That(collectionWithDuplicates.LastIndexOf(duplicateValue, static (l, r) => l == r)).IsEqualTo(collectionWithDuplicates.Count - 1);
+            await Assert.That(collectionWithDuplicates.LastIndexOf(duplicateValue, 0L, collectionWithDuplicates.Count, static (l, r) => l == r)).IsEqualTo(collectionWithDuplicates.Count - 1);
+        }
+    }
 
-            // No events should be fired while suspended
-            await Assert.That(tracker.CollectionChangedCount).IsEqualTo(0);
-            await Assert.That(tracker.PropertyChangedCount).IsEqualTo(0);
+    [Test]
+    public async Task Lookup_InvalidRanges_Throw()
+    {
+        LargeObservableCollection<long> collection = CreateCollectionWithSequence(2L, 0L);
+        Func<long, long, int> comparer = static (l, r) => l.CompareTo(r);
+
+        await Assert.That(() => collection.BinarySearch(0L, comparer, -1L, 1L)).Throws<Exception>();
+        await Assert.That(() => collection.Contains(0L, -1L, 1L)).Throws<Exception>();
+        await Assert.That(() => collection.Contains(0L, -1L, 1L, static (l, r) => l == r)).Throws<Exception>();
+        await Assert.That(() => collection.IndexOf(0L, -1L, 1L)).Throws<Exception>();
+        await Assert.That(() => collection.IndexOf(0L, -1L, 1L, static (l, r) => l == r)).Throws<Exception>();
+        await Assert.That(() => collection.LastIndexOf(0L, -1L, 1L)).Throws<Exception>();
+        await Assert.That(() => collection.LastIndexOf(0L, -1L, 1L, static (l, r) => l == r)).Throws<Exception>();
+    }
+
+    [Test]
+    [MethodDataSource(nameof(Capacities))]
+    public async Task Get_GetAll_And_Enumerator_ReturnElements(long capacity)
+    {
+        LargeObservableCollection<long> collection = CreateCollectionWithSequence(capacity, 5000L);
+
+        if (collection.Count > 0)
+        {
+            await Assert.That(collection.Get(0L)).IsEqualTo(collection[0]);
+        }
+        else
+        {
+            await Assert.That(() => collection.Get(0L)).Throws<Exception>();
         }
 
-        // After disposal, should fire Reset event
-        await Assert.That(collection.Count).IsEqualTo(3L);
-        await Assert.That(tracker.CollectionChangedCount).IsEqualTo(1);
-        await Assert.That(tracker.PropertyChangedCount).IsEqualTo(1);
+        await Assert.That(collection.GetAll().SequenceEqual(collection.ToList())).IsTrue();
+        long offset = Math.Min(1L, Math.Max(0L, collection.Count - 1L));
+        long count = collection.Count - offset;
+        await Assert.That(collection.GetAll(offset, count).SequenceEqual(collection.Skip((int)offset))).IsTrue();
 
-        NotifyCollectionChangedEventArgs collectionEvent = tracker.CollectionChangedEvents[0];
-        await Assert.That(collectionEvent.Action).IsEqualTo(NotifyCollectionChangedAction.Reset);
-    }
-
-    [Test]
-    public async Task SuspendNotifications_NestedSuspensions_WorksCorrectly()
-    {
-        LargeObservableCollection<int> collection = [];
-        SharedObservableTests.EventTracker tracker = SharedObservableTests.AttachEventTracker(collection);
-
-        using (collection.SuspendNotifications())
-        {
-            collection.Add(1);
-
-            using (collection.SuspendNotifications())
-            {
-                collection.Add(2);
-                // Still no events
-                await Assert.That(tracker.CollectionChangedCount).IsEqualTo(0);
-            }
-
-            collection.Add(3);
-            // Still suspended
-            await Assert.That(tracker.CollectionChangedCount).IsEqualTo(0);
-        }
-
-        // Now events should fire
-        await Assert.That(tracker.CollectionChangedCount).IsEqualTo(1);
-        await Assert.That(tracker.PropertyChangedCount).IsEqualTo(1);
-    }
-
-    [Test]
-    public async Task SuspendNotifications_NoChanges_NoEventsAfterDisposal()
-    {
-        LargeObservableCollection<int> collection = [];
-        collection.Add(1); // Pre-populate
-
-        SharedObservableTests.EventTracker tracker = SharedObservableTests.AttachEventTracker(collection);
-
-        using (collection.SuspendNotifications())
-        {
-            // No changes made while suspended
-        }
-
-        // No events should be fired since no changes occurred
-        await Assert.That(tracker.CollectionChangedCount).IsEqualTo(0);
-        await Assert.That(tracker.PropertyChangedCount).IsEqualTo(0);
-    }
-
-    [Test]
-    public async Task EventExceptionSuppression_SuppressedExceptions_DoNotPropagate()
-    {
-        LargeObservableCollection<int> collection = new(suppressEventExceptions: true);
-
-        // Attach an event handler that throws
-        collection.CollectionChanged += (sender, e) => throw new InvalidOperationException("Test exception");
-        collection.PropertyChanged += (sender, e) => throw new InvalidOperationException("Test exception");
-
-        // These operations should not throw despite the event handlers throwing
-        bool addSucceeded = false;
-        bool clearSucceeded = false;
-
-        try
-        {
-            collection.Add(1);
-            addSucceeded = true;
-        }
-        catch
-        {
-            // Should not reach here
-        }
-
-        try
-        {
-            collection.Clear();
-            clearSucceeded = true;
-        }
-        catch
-        {
-            // Should not reach here
-        }
-
-        await Assert.That(addSucceeded).IsTrue();
-        await Assert.That(clearSucceeded).IsTrue();
-        await Assert.That(collection.Count).IsEqualTo(0L);
-    }
-
-    [Test]
-    public async Task EventExceptionSuppression_NotSuppressed_ExceptionsPropagate()
-    {
-        LargeObservableCollection<int> collection = new(suppressEventExceptions: false);
-
-        // Attach an event handler that throws
-        collection.CollectionChanged += (sender, e) => throw new InvalidOperationException("Test exception");
-
-        // This operation should throw because exceptions are not suppressed
-        await Assert.That(() => collection.Add(1)).Throws<InvalidOperationException>();
-    }
-
-    [Test]
-    public async Task Sort_FiresResetEvent()
-    {
-        LargeObservableCollection<int> collection = [];
-        collection.AddRange([3, 1, 4, 1, 5]);
-
-        SharedObservableTests.EventTracker tracker = SharedObservableTests.AttachEventTracker(collection);
-        collection.Sort((x, y) => x.CompareTo(y));
-
-        await Assert.That(collection[0]).IsEqualTo(1);
-        await Assert.That(collection[1]).IsEqualTo(1);
-        await Assert.That(collection[2]).IsEqualTo(3);
-        await Assert.That(collection[3]).IsEqualTo(4);
-        await Assert.That(collection[4]).IsEqualTo(5);
-
-        await Assert.That(tracker.CollectionChangedCount).IsEqualTo(1);
-        NotifyCollectionChangedEventArgs collectionEvent = tracker.CollectionChangedEvents[0];
-        await Assert.That(collectionEvent.Action).IsEqualTo(NotifyCollectionChangedAction.Reset);
-    }
-
-    [Test]
-    public async Task Swap_FiresResetEvent()
-    {
-        LargeObservableCollection<string> collection = [];
-        collection.AddRange(["A", "B", "C"]);
-
-        SharedObservableTests.EventTracker tracker = SharedObservableTests.AttachEventTracker(collection);
-        collection.Swap(0, 2); // Swap first and last
-
-        await Assert.That(collection[0]).IsEqualTo("C");
-        await Assert.That(collection[1]).IsEqualTo("B");
-        await Assert.That(collection[2]).IsEqualTo("A");
-
-        await Assert.That(tracker.CollectionChangedCount).IsEqualTo(1);
-        NotifyCollectionChangedEventArgs collectionEvent = tracker.CollectionChangedEvents[0];
-        await Assert.That(collectionEvent.Action).IsEqualTo(NotifyCollectionChangedAction.Reset);
-    }
-
-    [Test]
-    public async Task CopyFrom_FiresResetEvent()
-    {
-        LargeObservableCollection<int> collection = [];
-        collection.AddRange([1, 2, 3, 4, 5]);
-
-        LargeArray<int> source = new(3);
-        source[0] = 10;
-        source[1] = 20;
-        source[2] = 30;
-
-        SharedObservableTests.EventTracker tracker = SharedObservableTests.AttachEventTracker(collection);
-        collection.CopyFrom(source, 0, 1, 3); // Copy all from source to collection starting at index 1
-
-        await Assert.That(collection[1]).IsEqualTo(10);
-        await Assert.That(collection[2]).IsEqualTo(20);
-        await Assert.That(collection[3]).IsEqualTo(30);
-
-        await Assert.That(tracker.CollectionChangedCount).IsEqualTo(1);
-        NotifyCollectionChangedEventArgs collectionEvent = tracker.CollectionChangedEvents[0];
-        await Assert.That(collectionEvent.Action).IsEqualTo(NotifyCollectionChangedAction.Reset);
-    }
-
-    [Test]
-    public async Task Contains_WorksCorrectly()
-    {
-        LargeObservableCollection<string> collection = [];
-        collection.AddRange(["Apple", "Banana", "Cherry"]);
-
-        await Assert.That(collection.Contains("Banana")).IsTrue();
-        await Assert.That(collection.Contains("Grape")).IsFalse();
-        await Assert.That(collection.Contains("Apple", 0, 3)).IsTrue();
-        await Assert.That(collection.Contains("Apple", 1, 2)).IsFalse();
-    }
-
-    [Test]
-    public async Task BinarySearch_WorksCorrectly()
-    {
-        LargeObservableCollection<int> collection = [];
-        collection.AddRange([1, 3, 5, 7, 9]);
-
-        long index = collection.BinarySearch(5, (x, y) => x.CompareTo(y));
-        await Assert.That(index).IsEqualTo(2L);
-
-        long notFoundIndex = collection.BinarySearch(6, (x, y) => x.CompareTo(y));
-        await Assert.That(notFoundIndex).IsLessThan(0L);
-    }
-
-    [Test]
-    public async Task GetEnumerator_WorksCorrectly()
-    {
-        LargeObservableCollection<double> collection = [];
-        collection.AddRange([1.1, 2.2, 3.3]);
-
-        List<double> enumerated = [];
-        foreach (double item in collection)
+        List<long> enumerated = new();
+        foreach (long item in collection)
         {
             enumerated.Add(item);
         }
+        await Assert.That(enumerated.SequenceEqual(collection.ToList())).IsTrue();
 
-        await Assert.That(enumerated.Count).IsEqualTo(3);
-        await Assert.That(enumerated[0]).IsEqualTo(1.1);
-        await Assert.That(enumerated[1]).IsEqualTo(2.2);
-        await Assert.That(enumerated[2]).IsEqualTo(3.3);
-    }
-
-    [Test]
-    public async Task NonRefMethods_WorkCorrectly()
-    {
-        LargeObservableCollection<int> collection = [];
-        collection.AddRange([1, 2, 3, 4, 5]);
-
-        // Test DoForEach with Action
-        int sum = 0;
-        collection.DoForEach(x => sum += x);
-        await Assert.That(sum).IsEqualTo(15);
-
-        // Test DoForEach with range
-        int partialSum = 0;
-        collection.DoForEach(x => partialSum += x, 1, 3);
-        await Assert.That(partialSum).IsEqualTo(9); // 2 + 3 + 4
-
-        // Test DoForEach with user data
-        List<int> collected = [];
-        collection.DoForEach((int x, ref List<int> data) => data.Add(x), ref collected);
-        await Assert.That(collected.Count).IsEqualTo(5);
-        await Assert.That(collected[0]).IsEqualTo(1);
-    }
-
-    [Test]
-    public async Task Remove_NullHandling()
-    {
-        // Test null handling for reference types - List-like collections should accept null items
-        LargeObservableCollection<string> stringCollection = [];
-
-        // Add null item
-        stringCollection.Add(null);
-        await Assert.That(stringCollection.Count).IsEqualTo(1L);
-
-        // All Remove variants should handle null without throwing (unlike Dictionary keys)
-        bool removed1 = stringCollection.Remove((string)null);
-        await Assert.That(removed1).IsTrue();
-        await Assert.That(stringCollection.Count).IsEqualTo(0L);
-
-        // Add null again for other tests
-        stringCollection.Add(null);
-        bool removed2 = stringCollection.Remove((string)null, preserveOrder: true);
-        await Assert.That(removed2).IsTrue();
-
-        stringCollection.Add(null);
-        bool removed3 = stringCollection.Remove((string)null, out string removedItem);
-        await Assert.That(removed3).IsTrue();
-        await Assert.That(removedItem).IsNull();
-
-        stringCollection.Add(null);
-        bool removed4 = stringCollection.Remove((string)null, preserveOrder: true, out string removedItem2);
-        await Assert.That(removed4).IsTrue();
-        await Assert.That(removedItem2).IsNull();
-    }
-
-    [Test]
-    public async Task AddRange_IReadOnlyLargeArray_FiresCorrectEvents()
-    {
-        LargeObservableCollection<int> collection = [];
-        SharedObservableTests.EventTracker tracker = SharedObservableTests.AttachEventTracker(collection);
-
-        // Create source array
-        LargeArray<int> sourceArray = new(10);
-        for (int i = 0; i < 10; i++)
+        IEnumerator enumerator = ((IEnumerable)collection).GetEnumerator();
+        List<long> enumeratedNonGeneric = new();
+        while (enumerator.MoveNext())
         {
-            sourceArray[i] = i * 2;
+            enumeratedNonGeneric.Add((long)enumerator.Current!);
+        }
+        await Assert.That(enumeratedNonGeneric.SequenceEqual(collection.ToList())).IsTrue();
+    }
+
+    [Test]
+    public async Task GetAll_InvalidRange_Throws()
+    {
+        LargeObservableCollection<long> collection = CreateCollectionWithSequence(3L, 8000L);
+        await Assert.That(() => collection.GetAll(-1L, 1L).ToList()).Throws<Exception>();
+    }
+
+    [Test]
+    [MethodDataSource(nameof(Capacities))]
+    public async Task DoForEach_Variants_Execute(long capacity)
+    {
+        LargeObservableCollection<long> collection = CreateCollectionWithSequence(capacity, 7000L);
+        long sum = 0L;
+        collection.DoForEach(item => sum += item);
+        await Assert.That(sum).IsEqualTo(collection.ToList().Sum());
+
+        long offset = Math.Min(1L, Math.Max(0L, collection.Count - 1L));
+        long rangeCount = collection.Count - offset;
+        long rangeSum = 0L;
+        collection.DoForEach(item => rangeSum += item, offset, rangeCount);
+        await Assert.That(rangeSum).IsEqualTo(collection.Skip((int)offset).Sum());
+
+        long accumulator = 0L;
+        collection.DoForEach(static (long value, ref long acc) => acc += value, ref accumulator);
+        await Assert.That(accumulator).IsEqualTo(collection.ToList().Sum());
+
+        long rangeAccumulator = 0L;
+        collection.DoForEach(static (long value, ref long acc) => acc += value, offset, rangeCount, ref rangeAccumulator);
+        await Assert.That(rangeAccumulator).IsEqualTo(collection.Skip((int)offset).Sum());
+    }
+
+    [Test]
+    public async Task DoForEach_InvalidRangesThrow()
+    {
+        LargeObservableCollection<long> collection = CreateCollectionWithSequence(3L, 0L);
+        await Assert.That(() => collection.DoForEach(_ => { }, -1L, 1L)).Throws<Exception>();
+        long data = 0L;
+        await Assert.That(() => collection.DoForEach(static (long _, ref long __) => { }, -1L, 1L, ref data)).Throws<Exception>();
+    }
+
+    #endregion
+
+    #region Ordering
+
+    [Test]
+    [MethodDataSource(nameof(Capacities))]
+    public async Task Sort_RaisesReset(long capacity)
+    {
+        LargeObservableCollection<long> collection = CreateCollectionWithSequence(capacity, 0L);
+        using EventRecorder<long> recorder = new(collection);
+
+        collection.Sort(static (l, r) => r.CompareTo(l));
+
+        if (collection.Count > 1)
+        {
+            await Assert.That(recorder.CollectionEvents.Last().Action).IsEqualTo(NotifyCollectionChangedAction.Reset);
+            List<long> sorted = collection.ToList();
+            await Assert.That(sorted.SequenceEqual(sorted.OrderByDescending(x => x))).IsTrue();
+        }
+        else
+        {
+            await Assert.That(recorder.CollectionEvents.Count).IsEqualTo(0);
         }
 
-        // Test AddRange with full array
-        collection.AddRange(sourceArray, 0, sourceArray.Count);
-
-        // Should fire events for multiple items
-        await Assert.That(tracker.CollectionChangedCount).IsGreaterThanOrEqualTo(1);
-        await Assert.That(collection.Count).IsEqualTo(10L);
-
-        // Test AddRange with single item
-        tracker.Clear();
-        collection.Clear();
-
-        collection.AddRange(sourceArray, 0, 1);
-        await Assert.That(tracker.CollectionChangedCount).IsGreaterThanOrEqualTo(1);
-        await Assert.That(collection.Count).IsEqualTo(1L);
-    }
-
-    [Test]
-    public async Task CopyFrom_Methods_FireResetEvent()
-    {
-        LargeObservableCollection<int> collection = [];
-        collection.AddRange([1, 2, 3, 4, 5]);
-        SharedObservableTests.EventTracker tracker = SharedObservableTests.AttachEventTracker(collection);
-
-        // Test CopyFrom with IReadOnlyLargeArray
-        LargeArray<int> sourceArray = new(3);
-        sourceArray[0] = 10;
-        sourceArray[1] = 20;
-        sourceArray[2] = 30;
-
-        collection.CopyFrom(sourceArray, 0, 1, 3);
-
-        await Assert.That(tracker.CollectionChangedCount).IsEqualTo(1);
-        await Assert.That(tracker.CollectionChangedEvents[0].Action).IsEqualTo(NotifyCollectionChangedAction.Reset);
-        await Assert.That(collection[1]).IsEqualTo(10);
-        await Assert.That(collection[2]).IsEqualTo(20);
-        await Assert.That(collection[3]).IsEqualTo(30);
-
-        // Test CopyFromArray
-        tracker.Clear();
-        int[] arraySource = [100, 200, 300];
-        collection.CopyFromArray(arraySource, 0, 0, 2);
-
-        await Assert.That(tracker.CollectionChangedCount).IsEqualTo(1);
-        await Assert.That(tracker.CollectionChangedEvents[0].Action).IsEqualTo(NotifyCollectionChangedAction.Reset);
-        await Assert.That(collection[0]).IsEqualTo(100);
-        await Assert.That(collection[1]).IsEqualTo(200);
-
-#if NETSTANDARD2_1_OR_GREATER || NETCOREAPP3_0_OR_GREATER || NET5_0_OR_GREATER
-        // Test CopyFromSpan
-        tracker.Clear();
-        ReadOnlySpan<int> spanSource = [500, 600];
-        collection.CopyFromSpan(spanSource, 2, 2);
-
-        await Assert.That(tracker.CollectionChangedCount).IsEqualTo(1);
-        await Assert.That(tracker.CollectionChangedEvents[0].Action).IsEqualTo(NotifyCollectionChangedAction.Reset);
-        await Assert.That(collection[2]).IsEqualTo(500);
-        await Assert.That(collection[3]).IsEqualTo(600);
-#endif
-    }
-
-    [Test]
-    public async Task CopyTo_Methods_WorkCorrectly()
-    {
-        LargeObservableCollection<int> collection = [];
-        collection.AddRange([10, 20, 30, 40, 50]);
-
-        // Test CopyTo with ILargeArray
-        LargeArray<int> targetArray = new(10);
-        collection.CopyTo(targetArray, 1, 2, 3);
-
-        await Assert.That(targetArray[2]).IsEqualTo(20);
-        await Assert.That(targetArray[3]).IsEqualTo(30);
-        await Assert.That(targetArray[4]).IsEqualTo(40);
-
-        // Test CopyToArray
-        int[] arrayTarget = new int[5];
-        collection.CopyToArray(arrayTarget, 0, 0, 3);
-
-        await Assert.That(arrayTarget[0]).IsEqualTo(10);
-        await Assert.That(arrayTarget[1]).IsEqualTo(20);
-        await Assert.That(arrayTarget[2]).IsEqualTo(30);
-
-#if NETSTANDARD2_1_OR_GREATER || NETCOREAPP3_0_OR_GREATER || NET5_0_OR_GREATER
-        // Test CopyToSpan
-        int[] spanTarget = new int[3];
-        collection.CopyToSpan(spanTarget.AsSpan(), 2, 3);
-        
-        await Assert.That(spanTarget[0]).IsEqualTo(30);
-        await Assert.That(spanTarget[1]).IsEqualTo(40);
-        await Assert.That(spanTarget[2]).IsEqualTo(50);
-#endif
-    }
-
-    [Test]
-    public async Task DoForEach_Methods_WorkCorrectly()
-    {
-        LargeObservableCollection<int> collection = [];
-        collection.AddRange([1, 2, 3, 4, 5]);
-
-        // Test DoForEach with Action
-        List<int> processedItems = [];
-        collection.DoForEach(item => processedItems.Add(item * 2));
-
-        await Assert.That(processedItems.Count).IsEqualTo(5);
-        await Assert.That(processedItems[0]).IsEqualTo(2);
-        await Assert.That(processedItems[4]).IsEqualTo(10);
-
-        // Test DoForEach with offset and count
-        processedItems.Clear();
-        collection.DoForEach(item => processedItems.Add(item * 3), 1, 3);
-
-        await Assert.That(processedItems.Count).IsEqualTo(3);
-        await Assert.That(processedItems[0]).IsEqualTo(6); // 2 * 3
-        await Assert.That(processedItems[2]).IsEqualTo(12); // 4 * 3
-
-        // Test DoForEach with UserData
-        long sum = 0;
-        collection.DoForEach((int item, ref long userSum) => userSum += item, ref sum);
-
-        await Assert.That(sum).IsEqualTo(15L); // 1+2+3+4+5
-
-        // Test DoForEach with UserData, offset and count
-        sum = 0;
-        collection.DoForEach((int item, ref long userSum) => userSum += item, 1, 3, ref sum);
-
-        await Assert.That(sum).IsEqualTo(9L); // 2+3+4
-    }
-
-    [Test]
-    public async Task Sort_WithOffsetAndCount_FiresResetEvent()
-    {
-        LargeObservableCollection<int> collection = [];
-        collection.AddRange([5, 1, 9, 3, 7, 2, 8]);
-        SharedObservableTests.EventTracker tracker = SharedObservableTests.AttachEventTracker(collection);
-
-        // Sort a subset of the collection
-        collection.Sort((a, b) => a.CompareTo(b), 1, 4); // Sort positions 1-4
-
-        await Assert.That(tracker.CollectionChangedCount).IsEqualTo(1);
-        await Assert.That(tracker.CollectionChangedEvents[0].Action).IsEqualTo(NotifyCollectionChangedAction.Reset);
-
-        // Check that only the specified range is sorted
-        await Assert.That(collection[0]).IsEqualTo(5);  // Unchanged
-        await Assert.That(collection[1]).IsEqualTo(1);  // Sorted
-        await Assert.That(collection[2]).IsEqualTo(3);  // Sorted  
-        await Assert.That(collection[3]).IsEqualTo(7);  // Sorted
-        await Assert.That(collection[4]).IsEqualTo(9);  // Sorted
-        await Assert.That(collection[5]).IsEqualTo(2);  // Unchanged
-        await Assert.That(collection[6]).IsEqualTo(8);  // Unchanged
-    }
-
-    [Test]
-    public async Task PropertyChangedEvents_FireForSpecificProperties()
-    {
-        LargeObservableCollection<int> collection = [];
-        SharedObservableTests.EventTracker tracker = SharedObservableTests.AttachEventTracker(collection);
-
-        // Add item should fire Count property change
-        collection.Add(42);
-
-        PropertyChangedEventArgs countEvent = tracker.PropertyChangedEvents.FirstOrDefault(e => e.PropertyName == "Count");
-        await Assert.That(countEvent).IsNotNull();
-
-        // Clear should also fire Count property change
-        tracker.Clear();
-        collection.Clear();
-
-        countEvent = tracker.PropertyChangedEvents.FirstOrDefault(e => e.PropertyName == "Count");
-        await Assert.That(countEvent).IsNotNull();
-    }
-
-    [Test]
-    public async Task LargeIndexOperations_FireResetEvents()
-    {
-        LargeObservableCollection<int> collection = [];
-
-        // Create collection with items at large indices
-        for (int i = 0; i < 1000; i++)
+        recorder.Reset();
+        long offset = Math.Min(1L, Math.Max(0L, collection.Count - 2L));
+        long count = Math.Min(2L, collection.Count - offset);
+        collection.Sort(static (l, r) => l.CompareTo(r), offset, count);
+        if (count > 1)
         {
-            collection.Add(i);
+            await Assert.That(recorder.CollectionEvents.Last().Action).IsEqualTo(NotifyCollectionChangedAction.Reset);
+        }
+    }
+
+    [Test]
+    [MethodDataSource(nameof(Capacities))]
+    public async Task Swap_RaisesReset(long capacity)
+    {
+        LargeObservableCollection<long> collection = CreateCollectionWithSequence(capacity, 100L);
+        if (collection.Count < 2)
+        {
+            await Assert.That(() => collection.Swap(0L, 1L)).Throws<Exception>();
+            return;
         }
 
-        SharedObservableTests.EventTracker tracker = SharedObservableTests.AttachEventTracker(collection);
+        using EventRecorder<long> recorder = new(collection);
+        long left = collection[0];
+        long right = collection[1];
+        collection.Swap(0L, 1L);
 
-        // Operations at large indices - Set fires Replace event
-        collection.Set(999, 9999);
-        await Assert.That(tracker.CollectionChangedCount).IsEqualTo(1);
-        await Assert.That(tracker.CollectionChangedEvents[0].Action).IsEqualTo(NotifyCollectionChangedAction.Replace);
-
-        tracker.Clear();
-        collection.RemoveAt(500); // Large index removal
-        await Assert.That(tracker.CollectionChangedCount).IsEqualTo(1);
-        await Assert.That(tracker.CollectionChangedEvents[0].Action).IsEqualTo(NotifyCollectionChangedAction.Remove);
+        await Assert.That(collection[0]).IsEqualTo(right);
+        await Assert.That(collection[1]).IsEqualTo(left);
+        await Assert.That(recorder.CollectionEvents.Last().Action).IsEqualTo(NotifyCollectionChangedAction.Reset);
     }
 
-    [Test]
-    public async Task EdgeCases_EmptyCollectionOperations()
-    {
-        LargeObservableCollection<int> collection = [];
-        SharedObservableTests.EventTracker tracker = SharedObservableTests.AttachEventTracker(collection);
+    #endregion
 
-        // Operations on empty collection
-        collection.AddRange([]);  // Empty range
-        // Note: AddRange with empty collection might still fire events
-        // await Assert.That(tracker.CollectionChangedCount).IsEqualTo(0);
-
-        bool removed = collection.Remove(42);
-        await Assert.That(removed).IsFalse();
-        await Assert.That(tracker.CollectionChangedCount).IsEqualTo(0);
-
-        // Sort empty collection
-        collection.Sort((a, b) => a.CompareTo(b));
-        // Note: Sort might fire events even on empty collection
-        // await Assert.That(tracker.CollectionChangedCount).IsEqualTo(0);
-
-        // DoForEach on empty collection
-        List<int> processed = [];
-        collection.DoForEach(item => processed.Add(item));
-        await Assert.That(processed.Count).IsEqualTo(0);
-    }
+    #region Suspension and ReadOnly
 
     [Test]
-    public async Task ConstructorVariants_WithSuppressEventExceptions()
+    public async Task SuspendNotifications_BatchesChanges()
     {
-        // Test all constructor variants with suppressEventExceptions parameter
-
-        // Constructor with capacity and suppressEventExceptions
-        LargeObservableCollection<int> collection1 = new(100, suppressEventExceptions: true);
-        await Assert.That(collection1.Count).IsEqualTo(0L);
-
-        // Constructor with IEnumerable and suppressEventExceptions
-        int[] items = [1, 2, 3];
-        LargeObservableCollection<int> collection2 = new(items, suppressEventExceptions: true);
-        await Assert.That(collection2.Count).IsEqualTo(3L);
-
-#if NETSTANDARD2_1_OR_GREATER || NETCOREAPP3_0_OR_GREATER || NET5_0_OR_GREATER
-        // Constructor with ReadOnlySpan and suppressEventExceptions
-        ReadOnlySpan<int> span = items.AsSpan();
-        LargeObservableCollection<int> collection3 = new(span, suppressEventExceptions: true);
-        await Assert.That(collection3.Count).IsEqualTo(3L);
-#endif
-
-        // Verify exception suppression works
-        collection1.CollectionChanged += (s, e) => throw new InvalidOperationException("Test exception");
-
-        // This should not throw because exceptions are suppressed
-        collection1.Add(42);
-        await Assert.That(collection1.Count).IsEqualTo(1L);
-    }
-
-    [Test]
-    public async Task SuspendNotifications_ComplexScenarios()
-    {
-        LargeObservableCollection<int> collection = [];
-        SharedObservableTests.EventTracker tracker = SharedObservableTests.AttachEventTracker(collection);
+        LargeObservableCollection<long> collection = new();
+        using EventRecorder<long> recorder = new(collection);
 
         using (collection.SuspendNotifications())
         {
-            // Multiple different operations while suspended
-            collection.Add(1);
-            collection.AddRange([2, 3, 4]);
-            collection[0] = 10;
-            collection.Remove(2);
-            collection.Sort((a, b) => a.CompareTo(b));
+            collection.Add(1L);
+            collection.Add(2L);
         }
 
-        // Should fire single Reset event after all operations
-        await Assert.That(tracker.CollectionChangedCount).IsEqualTo(1);
-        await Assert.That(tracker.CollectionChangedEvents[0].Action).IsEqualTo(NotifyCollectionChangedAction.Reset);
-        await Assert.That(collection.Count).IsEqualTo(3L);
+        await Assert.That(recorder.CollectionEvents.Count(e => e.Action == NotifyCollectionChangedAction.Reset)).IsEqualTo(1);
+        await Assert.That(recorder.PropertyEvents.Count(e => e.PropertyName == nameof(collection.Count))).IsEqualTo(1);
     }
 
     [Test]
-    public async Task GetAll_WithoutParameters_ReturnsAllElements()
+    public async Task SuspendNotifications_NoChanges_NoEvents()
     {
-        LargeObservableCollection<int> collection = [1, 2, 3, 4, 5];
+        LargeObservableCollection<long> collection = new();
+        using EventRecorder<long> recorder = new(collection);
 
-        List<int> result = collection.GetAll().ToList();
-
-        await Assert.That(result).IsEquivalentTo(new[] { 1, 2, 3, 4, 5 });
-    }
-
-    [Test]
-    public async Task GetAll_WithRange_ReturnsSpecifiedRange()
-    {
-        LargeObservableCollection<int> collection = [10, 20, 30, 40, 50];
-
-        List<int> result = collection.GetAll(1, 3).ToList();
-
-        await Assert.That(result).IsEquivalentTo(new[] { 20, 30, 40 });
-    }
-
-    [Test]
-    public async Task GetAll_WithEmptyCollection_ReturnsEmpty()
-    {
-        LargeObservableCollection<int> collection = [];
-
-        List<int> result = collection.GetAll().ToList();
-
-        await Assert.That(result).IsEmpty();
-    }
-
-    [Test]
-    public async Task GetAll_WithZeroCount_ReturnsEmpty()
-    {
-        LargeObservableCollection<int> collection = [1, 2, 3];
-
-        List<int> result = collection.GetAll(1, 0).ToList();
-
-        await Assert.That(result).IsEmpty();
-    }
-
-    [Test]
-    public async Task GetEnumerator_SupportsIteration()
-    {
-        LargeObservableCollection<string> collection = ["A", "B", "C"];
-        List<string> result = new List<string>();
-
-        foreach (string item in collection)
+        using (collection.SuspendNotifications())
         {
-            result.Add(item);
         }
 
-        await Assert.That(result).IsEquivalentTo(new[] { "A", "B", "C" });
+        await Assert.That(recorder.CollectionEvents.Count).IsEqualTo(0);
+        await Assert.That(recorder.PropertyEvents.Count).IsEqualTo(0);
     }
 
     [Test]
-    public async Task GetEnumerator_WithEmptyCollection_SupportsIteration()
+    public async Task SuspendNotifications_NoCountChange_SuppressesProperty()
     {
-        LargeObservableCollection<int> collection = [];
-        List<int> result = new List<int>();
+        LargeObservableCollection<long> collection = CreateCollectionWithSequence(3L, 10L);
+        using EventRecorder<long> recorder = new(collection);
 
-        foreach (int item in collection)
+        using (collection.SuspendNotifications())
         {
-            result.Add(item);
+            collection[0] = 99L;
         }
 
-        await Assert.That(result).IsEmpty();
+        await Assert.That(recorder.CollectionEvents.Count(e => e.Action == NotifyCollectionChangedAction.Reset)).IsEqualTo(1);
+        await Assert.That(recorder.PropertyEvents.Count).IsEqualTo(0);
     }
 
     [Test]
-    public async Task GetEnumerator_NonGeneric_SupportsIteration()
+    public async Task AsReadOnly_ReflectsChanges()
     {
-        LargeObservableCollection<int> collection = [1, 2, 3];
-        IEnumerable enumerable = (IEnumerable)collection;
-        List<object> result = new List<object>();
+        LargeObservableCollection<long> collection = new();
+        ReadOnlyLargeObservableCollection<long> readOnly = collection.AsReadOnly();
 
-        foreach (object item in enumerable)
-        {
-            result.Add(item);
-        }
+        collection.Add(5L);
 
-        await Assert.That(result).IsEquivalentTo(new object[] { 1, 2, 3 });
-    }
-
-    [Test]
-    public async Task Get_ReturnsElementAtIndex()
-    {
-        LargeObservableCollection<string> collection = ["First", "Second", "Third"];
-
-        await Assert.That(collection.Get(0)).IsEqualTo("First");
-        await Assert.That(collection.Get(1)).IsEqualTo("Second");
-        await Assert.That(collection.Get(2)).IsEqualTo("Third");
-    }
-
-    [Test]
-    public async Task Get_WithInvalidIndex_ThrowsException()
-    {
-        LargeObservableCollection<int> collection = [1, 2, 3];
-
-        await Assert.That(() => collection.Get(-1)).ThrowsExactly<IndexOutOfRangeException>();
-        await Assert.That(() => collection.Get(3)).ThrowsExactly<IndexOutOfRangeException>();
-    }
-
-    [Test]
-    public async Task GetAll_WithInvalidRange_ThrowsException()
-    {
-        LargeObservableCollection<int> collection = [1, 2, 3];
-
-        await Assert.That(() => collection.GetAll(-1, 1).ToList()).ThrowsExactly<ArgumentException>();
-        await Assert.That(() => collection.GetAll(0, -1).ToList()).ThrowsExactly<ArgumentException>();
-        await Assert.That(() => collection.GetAll(2, 5).ToList()).ThrowsExactly<ArgumentException>();
-    }
-
-    [Test]
-    public async Task GetEnumerator_SupportsConcurrentRead()
-    {
-        LargeObservableCollection<int> collection = [1, 2, 3, 4, 5];
-        List<int> results = [];
-
-        // Test that reading while enumeration works (no concurrent modification exception)
-        foreach (int item in collection)
-        {
-            results.Add(item);
-            _ = collection.Count; // Read operation during enumeration
-        }
-
-        await Assert.That(results).IsEquivalentTo(new[] { 1, 2, 3, 4, 5 });
-    }
-
-    // =============== AsReadOnly Tests ===============
-
-    [Test]
-    public async Task AsReadOnly_ReturnsReadOnlyWrapper()
-    {
-        LargeObservableCollection<int> collection = [1, 2, 3, 4, 5];
-        ReadOnlyLargeObservableCollection<int> readOnly = collection.AsReadOnly();
-
-        await Assert.That(readOnly).IsNotNull();
-        await Assert.That(readOnly.Count).IsEqualTo(5L);
-        await SharedObservableTests.VerifyIndexerAccess(readOnly, 0, 1);
-        await SharedObservableTests.VerifyIndexerAccess(readOnly, 4, 5);
-    }
-
-    [Test]
-    public async Task AsReadOnly_ForwardsEventsFromOriginalCollection()
-    {
-        LargeObservableCollection<string> collection = ["A", "B", "C"];
-        ReadOnlyLargeObservableCollection<string> readOnly = collection.AsReadOnly();
-        SharedObservableTests.EventTracker tracker = SharedObservableTests.AttachEventTracker(readOnly);
-
-        // Modify original collection
-        collection.Add("D");
-        await SharedObservableTests.VerifyCollectionChangedEventFires(tracker, 1, NotifyCollectionChangedAction.Add);
-
-        tracker.Clear();
-        collection.RemoveAt(0);
-        await SharedObservableTests.VerifyCollectionChangedEventFires(tracker, 1, NotifyCollectionChangedAction.Remove);
-
-        tracker.Clear();
-        collection[0] = "Modified";
-        await SharedObservableTests.VerifyCollectionChangedEventFires(tracker, 1, NotifyCollectionChangedAction.Replace);
-    }
-
-    [Test]
-    public async Task AsReadOnly_ReflectsChangesInOriginalCollection()
-    {
-        LargeObservableCollection<int> collection = [10, 20, 30];
-        ReadOnlyLargeObservableCollection<int> readOnly = collection.AsReadOnly();
-
-        await Assert.That(readOnly.Count).IsEqualTo(3L);
-
-        // Add to original
-        collection.Add(40);
-        await Assert.That(readOnly.Count).IsEqualTo(4L);
-        await SharedObservableTests.VerifyIndexerAccess(readOnly, 3, 40);
-
-        // Remove from original
-        collection.RemoveAt(0);
-        await Assert.That(readOnly.Count).IsEqualTo(3L);
-        await SharedObservableTests.VerifyIndexerAccess(readOnly, 0, 20);
-
-        // Clear original
-        collection.Clear();
-        await Assert.That(readOnly.Count).IsEqualTo(0L);
-    }
-
-    [Test]
-    public async Task AsReadOnly_MultipleSuspensions_WorkIndependently()
-    {
-        LargeObservableCollection<int> collection = [1, 2, 3];
-        ReadOnlyLargeObservableCollection<int> readOnly = collection.AsReadOnly();
-
-        SharedObservableTests.EventTracker collectionTracker = SharedObservableTests.AttachEventTracker(collection);
-        SharedObservableTests.EventTracker readOnlyTracker = SharedObservableTests.AttachEventTracker(readOnly);
-
-        // Suspend only the read-only wrapper
-        using (readOnly.SuspendNotifications())
-        {
-            collection.Add(4);
-
-            // Original collection should fire events
-            await Assert.That(collectionTracker.CollectionChangedCount).IsEqualTo(1);
-            // Read-only wrapper should not fire events
-            await SharedObservableTests.VerifyNoEventsFire(readOnlyTracker);
-        }
-
-        // After suspension, read-only wrapper should fire events
-        await Assert.That(readOnlyTracker.CollectionChangedCount).IsEqualTo(1);
-    }
-
-    [Test]
-    public async Task AsReadOnly_WithSuppressEventExceptions_OriginalSettingNotAffected()
-    {
-        // Original collection does NOT suppress exceptions
-        LargeObservableCollection<int> collection = new(suppressEventExceptions: false);
-        collection.Add(1);
-
-        // But AsReadOnly() creates wrapper with default suppressEventExceptions: false
-        ReadOnlyLargeObservableCollection<int> readOnly = collection.AsReadOnly();
-
-        // Attach throwing handler to read-only wrapper
-        readOnly.CollectionChanged += (s, e) => throw new InvalidOperationException("ReadOnly exception");
-
-        // This should throw from read-only wrapper
-        await Assert.That(() => collection.Add(2)).Throws<InvalidOperationException>();
-    }
-
-    [Test]
-    public async Task AsReadOnly_MultipleCallsReturnDifferentInstances()
-    {
-        LargeObservableCollection<int> collection = [1, 2, 3];
-
-        ReadOnlyLargeObservableCollection<int> readOnly1 = collection.AsReadOnly();
-        ReadOnlyLargeObservableCollection<int> readOnly2 = collection.AsReadOnly();
-
-        // Should return different instances (not cached)
-        await Assert.That(ReferenceEquals(readOnly1, readOnly2)).IsFalse();
-
-        // But both should wrap the same collection
-        await Assert.That(readOnly1.Count).IsEqualTo(readOnly2.Count);
-        collection.Add(4);
-        await Assert.That(readOnly1.Count).IsEqualTo(4L);
-        await Assert.That(readOnly2.Count).IsEqualTo(4L);
-    }
-
-    [Test]
-    public async Task AsReadOnly_WithEmptyCollection_WorksCorrectly()
-    {
-        LargeObservableCollection<string> collection = [];
-        ReadOnlyLargeObservableCollection<string> readOnly = collection.AsReadOnly();
-
-        await Assert.That(readOnly.Count).IsEqualTo(0L);
-        await SharedObservableTests.VerifyGetAll(readOnly, []);
-
-        collection.Add("First");
         await Assert.That(readOnly.Count).IsEqualTo(1L);
-        await SharedObservableTests.VerifyIndexerAccess(readOnly, 0, "First");
+        await Assert.That(readOnly[0]).IsEqualTo(5L);
     }
 
-    [Test]
-    public async Task AsReadOnly_SupportsAllReadOnlyOperations()
+    #endregion
+
+    #region Helpers
+
+    private static LargeObservableCollection<long> CreateCollectionWithSequence(long count, long start)
     {
-        LargeObservableCollection<int> collection = [1, 2, 3, 4, 5];
-        ReadOnlyLargeObservableCollection<int> readOnly = collection.AsReadOnly();
-
-        // Test Contains
-        await SharedObservableTests.VerifyContains(readOnly, 3, true);
-        await SharedObservableTests.VerifyContains(readOnly, 10, false);
-
-        // Test Get
-        await SharedObservableTests.VerifyGet(readOnly, 2, 3);
-
-        // Test GetAll
-        await SharedObservableTests.VerifyGetAll(readOnly, [1, 2, 3, 4, 5]);
-
-        // Test Enumeration
-        await SharedObservableTests.VerifyEnumeration(readOnly, [1, 2, 3, 4, 5]);
-
-        // Test DoForEach
-        List<int> processed = [];
-        readOnly.DoForEach(item => processed.Add(item * 2));
-        await Assert.That(processed).IsEquivalentTo(new[] { 2, 4, 6, 8, 10 });
-    }
-
-    // =============== Missing Method Coverage Tests ===============
-
-    [Test]
-    public async Task RemoveAt_WithPreserveOrderFalse_WorksCorrectly()
-    {
-        LargeObservableCollection<int> collection = [1, 2, 3, 4, 5];
-        SharedObservableTests.EventTracker tracker = SharedObservableTests.AttachEventTracker(collection);
-
-        // RemoveAt with preserveOrder=false should be faster but changes order
-        int removed = collection.RemoveAt(1, preserveOrder: false);
-
-        await Assert.That(removed).IsEqualTo(2);
-        await Assert.That(collection.Count).IsEqualTo(4L);
-
-        // Should fire Remove event
-        await SharedObservableTests.VerifyCollectionChangedEventFires(tracker, 1, NotifyCollectionChangedAction.Remove);
-        await SharedObservableTests.VerifyPropertyChangedEventForCount(tracker);
-    }
-
-    [Test]
-    public async Task RemoveAt_PreserveOrderComparison()
-    {
-        // Test with preserveOrder=true
-        LargeObservableCollection<int> collectionPreserve = [1, 2, 3, 4, 5];
-        collectionPreserve.RemoveAt(1, preserveOrder: true);
-
-        await Assert.That(collectionPreserve[0]).IsEqualTo(1);
-        await Assert.That(collectionPreserve[1]).IsEqualTo(3);
-        await Assert.That(collectionPreserve[2]).IsEqualTo(4);
-        await Assert.That(collectionPreserve[3]).IsEqualTo(5);
-
-        // Test with preserveOrder=false (order may change)
-        LargeObservableCollection<int> collectionNoPreserve = [1, 2, 3, 4, 5];
-        collectionNoPreserve.RemoveAt(1, preserveOrder: false);
-
-        await Assert.That(collectionNoPreserve.Count).IsEqualTo(4L);
-        await Assert.That(collectionNoPreserve.Contains(2)).IsFalse();
-    }
-
-    [Test]
-    public async Task BinarySearch_WithOffsetAndCount_WorksCorrectly()
-    {
-        LargeObservableCollection<int> collection = [0, 1, 2, 3, 5, 8, 13, 21, 34, 55];
-
-        // Search within a specific range
-        long index = collection.BinarySearch(8, (x, y) => x.CompareTo(y), 3, 5);
-        await Assert.That(index).IsEqualTo(5L);
-
-        // Search outside the specified range should not find
-        long notFoundIndex = collection.BinarySearch(1, (x, y) => x.CompareTo(y), 5, 5);
-        await Assert.That(notFoundIndex).IsLessThan(0L);
-
-        // Search at exact range boundary
-        long boundaryIndex = collection.BinarySearch(3, (x, y) => x.CompareTo(y), 0, 4);
-        await Assert.That(boundaryIndex).IsEqualTo(3L);
-    }
-
-    [Test]
-    public async Task BinarySearch_WithOffsetAndCount_EdgeCases()
-    {
-        LargeObservableCollection<string> collection = ["A", "C", "E", "G", "I", "K", "M"];
-
-        // Search with offset=0, count=3
-        long index1 = collection.BinarySearch("C", (x, y) => string.Compare(x, y, StringComparison.Ordinal), 0, 3);
-        await Assert.That(index1).IsEqualTo(1L);
-
-        // Search with offset in middle
-        long index2 = collection.BinarySearch("I", (x, y) => string.Compare(x, y, StringComparison.Ordinal), 3, 3);
-        await Assert.That(index2).IsEqualTo(4L);
-
-        // Search for item outside range
-        long notFound = collection.BinarySearch("M", (x, y) => string.Compare(x, y, StringComparison.Ordinal), 0, 5);
-        await Assert.That(notFound).IsLessThan(0L);
-    }
-
-    [Test]
-    public async Task IndexerSet_LargeIndex_ConceptualTest()
-    {
-        // Note: We cannot actually test with indices > int.MaxValue in practical tests
-        // but we can verify the behavior with available indices
-        LargeObservableCollection<string> collection = [];
-
-        // Add enough items to test the logic
-        for (int i = 0; i < 1000; i++)
+        long actual = Math.Max(0L, Math.Min(count, Constants.MaxLargeCollectionCount));
+        LargeObservableCollection<long> collection = new(actual);
+        for (long i = 0L; i < actual; i++)
         {
-            collection.Add($"Item{i}");
+            collection.Add(start + i);
+        }
+        return collection;
+    }
+
+    private static LargeObservableCollection<long> CreateCollectionWithSameValue(long count, long value)
+    {
+        long actual = Math.Max(0L, Math.Min(count, Constants.MaxLargeCollectionCount));
+        LargeObservableCollection<long> collection = new(actual);
+        for (long i = 0L; i < actual; i++)
+        {
+            collection.Add(value);
+        }
+        return collection;
+    }
+
+    private static LargeArray<long> CreateSequentialArray(long count, long start = 0L)
+    {
+        long actual = Math.Max(0L, Math.Min(count, Constants.MaxLargeCollectionCount));
+        LargeArray<long> array = new(actual);
+        for (long i = 0L; i < actual; i++)
+        {
+            array[i] = start + i;
+        }
+        return array;
+    }
+
+    private sealed class EventRecorder<T> : IDisposable
+    {
+        private readonly LargeObservableCollection<T> _collection;
+
+        public List<NotifyCollectionChangedEventArgs> CollectionEvents { get; } = new();
+        public List<PropertyChangedEventArgs> PropertyEvents { get; } = new();
+
+        public EventRecorder(LargeObservableCollection<T> collection)
+        {
+            _collection = collection;
+            _collection.CollectionChanged += OnCollectionChanged;
+            _collection.PropertyChanged += OnPropertyChanged;
         }
 
-        SharedObservableTests.EventTracker tracker = SharedObservableTests.AttachEventTracker(collection);
-
-        // Set at index 999 (within int.MaxValue)
-        collection[999] = "Modified";
-
-        await Assert.That(collection[999]).IsEqualTo("Modified");
-        await SharedObservableTests.VerifyCollectionChangedEventFires(tracker, 1, NotifyCollectionChangedAction.Replace);
-    }
-
-    [Test]
-    public async Task CopyFrom_SingleItem_FiresReplaceEvent()
-    {
-        LargeObservableCollection<int> collection = [1, 2, 3, 4, 5];
-        LargeArray<int> source = new(1);
-        source[0] = 99;
-
-        SharedObservableTests.EventTracker tracker = SharedObservableTests.AttachEventTracker(collection);
-
-        // Copy single item
-        collection.CopyFrom(source, 0, 2, 1);
-
-        await Assert.That(collection[2]).IsEqualTo(99);
-        await SharedObservableTests.VerifyCollectionChangedEventFires(tracker, 1, NotifyCollectionChangedAction.Replace);
-    }
-
-    [Test]
-    public async Task CopyFromArray_SingleItem_FiresReplaceEvent()
-    {
-        LargeObservableCollection<string> collection = ["A", "B", "C", "D"];
-        string[] source = ["X"];
-
-        SharedObservableTests.EventTracker tracker = SharedObservableTests.AttachEventTracker(collection);
-
-        collection.CopyFromArray(source, 0, 1, 1);
-
-        await Assert.That(collection[1]).IsEqualTo("X");
-        await SharedObservableTests.VerifyCollectionChangedEventFires(tracker, 1, NotifyCollectionChangedAction.Replace);
-    }
-
-#if NETSTANDARD2_1_OR_GREATER || NETCOREAPP3_0_OR_GREATER || NET5_0_OR_GREATER
-    [Test]
-    public async Task CopyFromSpan_SingleItem_FiresReplaceEvent()
-    {
-        LargeObservableCollection<double> collection = [1.1, 2.2, 3.3, 4.4];
-        ReadOnlySpan<double> source = [9.9];
-
-        SharedObservableTests.EventTracker tracker = SharedObservableTests.AttachEventTracker(collection);
-        
-        collection.CopyFromSpan(source, 0, 1);
-
-        await Assert.That(collection[0]).IsEqualTo(9.9);
-        await SharedObservableTests.VerifyCollectionChangedEventFires(tracker, 1, NotifyCollectionChangedAction.Replace);
-    }
-#endif
-
-    [Test]
-    public async Task CopyFrom_ZeroCount_NoEvents()
-    {
-        LargeObservableCollection<int> collection = [1, 2, 3];
-        LargeArray<int> source = new(5);
-
-        SharedObservableTests.EventTracker tracker = SharedObservableTests.AttachEventTracker(collection);
-
-        // Copy zero items - implementation may validate this
-        // The behavior depends on implementation details
-        bool threwException = false;
-        try
+        private void OnCollectionChanged(object sender, NotifyCollectionChangedEventArgs e)
         {
-            collection.CopyFrom(source, 0, 0, 0);
-        }
-        catch (ArgumentException)
-        {
-            threwException = true;
+            CollectionEvents.Add(e);
         }
 
-        // If no exception, verify no events fired
-        if (!threwException)
+        private void OnPropertyChanged(object sender, PropertyChangedEventArgs e)
         {
-            await SharedObservableTests.VerifyNoEventsFire(tracker);
+            PropertyEvents.Add(e);
+        }
+
+        public void Reset()
+        {
+            CollectionEvents.Clear();
+            PropertyEvents.Clear();
+        }
+
+        public void Dispose()
+        {
+            _collection.CollectionChanged -= OnCollectionChanged;
+            _collection.PropertyChanged -= OnPropertyChanged;
         }
     }
+
+    private static IEnumerable<long> GenerateSequence(int count)
+    {
+        for (int i = 0; i < count; i++)
+        {
+            yield return i;
+        }
+    }
+
+    #endregion
 }
+

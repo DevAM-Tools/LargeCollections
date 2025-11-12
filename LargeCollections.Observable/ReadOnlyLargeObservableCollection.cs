@@ -23,11 +23,14 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
 
+using System;
 using System.Collections;
+using System.Collections.Generic;
 using System.Collections.Specialized;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
+using System.Threading;
 
 namespace LargeCollections.Observable;
 
@@ -185,11 +188,23 @@ public class ReadOnlyLargeObservableCollection<T> : IReadOnlyLargeObservableColl
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public bool Contains(T item)
-            => _Inner.Contains(item);
+        => _Inner.Contains(item);
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public bool Contains(T item, Func<T, T, bool> equalsFunction)
+    => _Inner.Contains(item, equalsFunction);
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public bool Contains(T item, long offset, long count, Func<T, T, bool> equalsFunction)
+        => _Inner.Contains(item, offset, count, equalsFunction);
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void CopyTo(ILargeArray<T> target, long sourceOffset, long targetOffset, long count)
         => _Inner.CopyTo(target, sourceOffset, targetOffset, count);
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public void CopyTo(LargeSpan<T> target, long sourceOffset, long count)
+       => _Inner.CopyTo(target, sourceOffset, count);
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void CopyToArray(T[] target, long sourceOffset, int targetOffset, int count)
@@ -269,10 +284,47 @@ public class ReadOnlyLargeObservableCollection<T> : IReadOnlyLargeObservableColl
         }
     }
 
-    internal class NotificationSuspender(ReadOnlyLargeObservableCollection<T> collection) : IDisposable
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public long IndexOf(T item)
+        => _Inner.IndexOf(item);
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public long IndexOf(T item, long offset, long count)
+        => _Inner.IndexOf(item, offset, count);
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public long IndexOf(T item, Func<T, T, bool> equalsFunction)
+        => _Inner.IndexOf(item, equalsFunction);
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public long IndexOf(T item, long offset, long count, Func<T, T, bool> equalsFunction)
+        => _Inner.IndexOf(item, offset, count, equalsFunction);
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public long LastIndexOf(T item)
+        => _Inner.LastIndexOf(item);
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public long LastIndexOf(T item, long offset, long count)
+        => _Inner.LastIndexOf(item, offset, count);
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public long LastIndexOf(T item, Func<T, T, bool> equalsFunction)
+        => _Inner.LastIndexOf(item, equalsFunction);
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public long LastIndexOf(T item, long offset, long count, Func<T, T, bool> equalsFunction)
+         => _Inner.LastIndexOf(item, offset, count, equalsFunction);
+
+    internal class NotificationSuspender : IDisposable
     {
-        private readonly ReadOnlyLargeObservableCollection<T> _Collection = collection ?? throw new ArgumentNullException(nameof(collection));
+        private readonly ReadOnlyLargeObservableCollection<T> _Collection;
         private bool _Disposed = false;
+
+        public NotificationSuspender(ReadOnlyLargeObservableCollection<T> collection)
+        {
+            _Collection = collection ?? throw new ArgumentNullException(nameof(collection));
+        }
 
         public void Dispose()
         {

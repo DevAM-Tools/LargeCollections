@@ -23,7 +23,9 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
 
+using System;
 using System.Collections;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
 
@@ -50,23 +52,23 @@ public class LargeSet<T> : ILargeCollection<T>
         return result;
     }
 
-    protected LargeArray<SetElement> _Storage = null;
+    private SetElement<T>[][] _Storage = null;
+    private long _Capacity = 0L;
+
+    private readonly Func<T, T, bool> _equalsFunction;
+    private readonly Func<T, int> _hashCodeFunction;
 
     public Func<T, T, bool> EqualsFunction
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        get;
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        protected set;
+        get => _equalsFunction;
     }
 
 
-    public static Func<T, int> HashCodeFunction
+    public Func<T, int> HashCodeFunction
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        get;
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        protected set;
+        get => _hashCodeFunction;
     }
 
     public double CapacityGrowFactor
@@ -104,7 +106,7 @@ public class LargeSet<T> : ILargeCollection<T>
     public long Capacity
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        get => _Storage.Count;
+        get => _Capacity;
     }
 
     public readonly double MinLoadFactor;
@@ -157,10 +159,11 @@ public class LargeSet<T> : ILargeCollection<T>
             throw new ArgumentOutOfRangeException(nameof(minLoadFactorTolerance));
         }
 
-        EqualsFunction = equalsFunction ?? DefaultEqualsFunction;
-        HashCodeFunction = hashCodeFunction ?? DefaultHashCodeFunction;
+        _equalsFunction = equalsFunction ?? DefaultEqualsFunction;
+        _hashCodeFunction = hashCodeFunction ?? DefaultHashCodeFunction;
 
-        _Storage = new LargeArray<SetElement>(capacity);
+        _Storage = StorageExtensions.StorageCreate<SetElement<T>>(capacity);
+        _Capacity = capacity;
 
         Count = 0L;
 
@@ -177,105 +180,25 @@ public class LargeSet<T> : ILargeCollection<T>
         MinLoadFactorTolerance = minLoadFactorTolerance;
     }
 
-    public LargeSet(IEnumerable<T> items,
-        Func<T, T, bool> equalsFunction = null,
-        Func<T, int> hashCodeFunction = null,
-        long capacity = 1L,
-        double capacityGrowFactor = Constants.DefaultCapacityGrowFactor,
-        long fixedCapacityGrowAmount = Constants.DefaultFixedCapacityGrowAmount,
-        long fixedCapacityGrowLimit = Constants.DefaultFixedCapacityGrowLimit,
-        double minLoadFactor = Constants.DefaultMinLoadFactor,
-        double maxLoadFactor = Constants.DefaultMaxLoadFactor,
-        double minLoadFactorTolerance = Constants.DefaultMinLoadFactorTolerance)
-
-        : this(equalsFunction,
-            hashCodeFunction,
-            capacity,
-            capacityGrowFactor,
-            fixedCapacityGrowAmount,
-            fixedCapacityGrowLimit,
-            minLoadFactor,
-            maxLoadFactor,
-            minLoadFactorTolerance)
-    {
-        AddRange(items);
-    }
-
-#if NETSTANDARD2_1_OR_GREATER || NETCOREAPP3_0_OR_GREATER || NET5_0_OR_GREATER
-    public LargeSet(ReadOnlySpan<T> items,
-        Func<T, T, bool> equalsFunction = null,
-        Func<T, int> hashCodeFunction = null,
-        long capacity = 1L,
-        double capacityGrowFactor = Constants.DefaultCapacityGrowFactor,
-        long fixedCapacityGrowAmount = Constants.DefaultFixedCapacityGrowAmount,
-        long fixedCapacityGrowLimit = Constants.DefaultFixedCapacityGrowLimit,
-        double minLoadFactor = Constants.DefaultMinLoadFactor,
-        double maxLoadFactor = Constants.DefaultMaxLoadFactor,
-        double minLoadFactorTolerance = Constants.DefaultMinLoadFactorTolerance)
-
-        : this(equalsFunction,
-            hashCodeFunction,
-            capacity,
-            capacityGrowFactor,
-            fixedCapacityGrowAmount,
-            fixedCapacityGrowLimit,
-            minLoadFactor,
-            maxLoadFactor,
-            minLoadFactorTolerance)
-    {
-        AddRange(items);
-    }
-#endif
-
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    protected static void AddToStorageInternal(ref T item, LargeArray<SetElement> storage, ref long count, Func<T, T, bool> equalsFunction, Func<T, int> hashCodeFunction)
+    public void Add(T item)
     {
-        long bucketIndex = GetBucketIndexInternal(item, storage.Count, hashCodeFunction);
-
-        SetElement element = storage[bucketIndex];
-
-        if (element is null)
-        {
-            storage[bucketIndex] = new SetElement(item);
-            count++;
-            return;
-        }
-
-        while (element is not null)
-        {
-            if (equalsFunction.Invoke(item, element.Item))
-            {
-                element.Item = item;
-                return;
-            }
-
-            if (element.NextElement is null)
-            {
-                element.NextElement = new SetElement(item);
-                count++;
-                return;
-            }
-
-            element = element.NextElement;
-        }
-    }
-
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public virtual void Add(T item)
-    {
-        if (Count >= Constants.MaxLargeCollectionCount)
+        long count = Count;
+        long previousCount = count;
+        LargeSetHelpers.AddToStorage(ref item, _Storage, _Capacity, ref count, EqualsFunction, HashCodeFunction);
+        
+        if (count > previousCount && count > Constants.MaxLargeCollectionCount)
         {
             throw new InvalidOperationException($"Can not store more than {Constants.MaxLargeCollectionCount} items.");
         }
-        long count = Count;
-        AddToStorageInternal(ref item, _Storage, ref count, EqualsFunction, HashCodeFunction);
+        
         Count = count;
 
-        ExtendInternal();
+        Extend();
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public virtual void AddRange(IEnumerable<T> items)
+    public void AddRange(IEnumerable<T> items)
     {
         if (items is null)
         {
@@ -289,13 +212,6 @@ public class LargeSet<T> : ILargeCollection<T>
                 Add(list[i]);
             }
         }
-        else if (items is IReadOnlyLargeArray<T> largeArray)
-        {
-            for (long i = 0L; i < largeArray.Count; i++)
-            {
-                Add(largeArray[i]);
-            }
-        }
         else
         {
             foreach (T item in items)
@@ -305,9 +221,71 @@ public class LargeSet<T> : ILargeCollection<T>
         }
     }
 
+    /// <summary>
+    /// Adds a range of items from a large array to the set.
+    /// </summary>
+    /// <param name="items">The large array of items to add.</param>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public void AddRange(IReadOnlyLargeArray<T> items)
+    {
+        if (items is null)
+        {
+            throw new ArgumentNullException(nameof(items));
+        }
+
+        AddRange(items, 0L, items.Count);
+    }
+
+    /// <summary>
+    /// Adds a range of items from a large array to the set.
+    /// </summary>
+    /// <param name="items">The large array of items to add.</param>
+    /// <param name="offset">The offset in the large array to start adding from.</param>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public void AddRange(IReadOnlyLargeArray<T> items, long offset)
+    {
+        if (items is null)
+        {
+            throw new ArgumentNullException(nameof(items));
+        }
+
+        AddRange(items, offset, items.Count - offset);
+    }
+
+
+    /// <summary>
+    /// Adds a range of items from a large array to the set.
+    /// </summary>
+    /// <param name="items">The large array of items to add.</param>
+    /// <param name="offset">The offset in the large array to start adding from.</param>
+    /// <param name="count">The number of items to add.</param>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public void AddRange(IReadOnlyLargeArray<T> items, long offset, long count)
+    {
+        if (items is null)
+        {
+            throw new ArgumentNullException(nameof(items));
+        }
+
+        StorageExtensions.CheckRange(offset, count, items.Count);
+        for (long i = 0L; i < count; i++)
+        {
+            Add(items[offset + i]);
+        }
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public void AddRange(ReadOnlyLargeSpan<T> items)
+    {
+        for (long i = 0L; i < items.Count; i++)
+        {
+            Add(items[i]);
+        }
+    }
+
 #if NETSTANDARD2_1_OR_GREATER || NETCOREAPP3_0_OR_GREATER || NET5_0_OR_GREATER
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public virtual void AddRange(ReadOnlySpan<T> items)
+    public void AddRange(ReadOnlySpan<T> items)
     {
         for (int i = 0; i < items.Length; i++)
         {
@@ -317,122 +295,122 @@ public class LargeSet<T> : ILargeCollection<T>
 #endif
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public virtual bool Remove(T item)
+    public bool Remove(T item)
         => Remove(item, out _);
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public virtual bool Remove(T item, out T removedItem)
+    public bool Remove(T item, out T removedItem)
     {
-        removedItem = default;
+        long count = Count;
+        bool result = LargeSetHelpers.RemoveFromStorage(item, _Storage, ref count, Capacity, EqualsFunction, HashCodeFunction, out removedItem);
+        Count = count;
 
-        long bucketIndex = GetBucketIndexInternal(item, Capacity, HashCodeFunction);
-
-        SetElement element = _Storage[bucketIndex];
-        SetElement previousElement = null;
-
-        while (element is not null)
+        if (result)
         {
-            if (EqualsFunction.Invoke(item, element.Item))
-            {
-                removedItem = element.Item;
-                element.Item = default;
-
-                // Is it the first and only element?
-                if (previousElement is null && element.NextElement is null)
-                {
-                    _Storage[bucketIndex] = null;
-                }
-                // Is it the first but one of many elements?
-                else if (previousElement is null && element.NextElement is not null)
-                {
-                    _Storage[bucketIndex] = element.NextElement;
-                }
-                // Is is one of many elements but not the first one?
-                else
-                {
-                    previousElement.NextElement = element.NextElement;
-                }
-
-                Count--;
-
-                Shrink();
-                return true;
-            }
-
-            previousElement = element;
-            element = element.NextElement;
+            Shrink();
         }
 
-        return false;
+        return result;
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void Clear()
     {
-        long capacity = Capacity;
-
-        for (long i = 0L; i < capacity; i++)
-        {
-            SetElement element = _Storage[i];
-
-            while (element is not null)
-            {
-                element.Item = default;
-
-                SetElement nextElement = element.NextElement;
-                element.NextElement = null;
-                element = nextElement;
-            }
-
-            _Storage[i] = null;
-        }
-
-        Count = 0L;
+        long count = Count;
+        LargeSetHelpers.ClearStorage(_Storage, _Capacity, ref count);
+        Count = count;
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public bool TryGetValue(T item, out T value)
     {
-        long bucketIndex = GetBucketIndexInternal(item, Capacity, HashCodeFunction);
-
-        SetElement element = _Storage[bucketIndex];
-
-        while (element is not null)
-        {
-            if (EqualsFunction.Invoke(item, element.Item))
-            {
-                value = element.Item;
-                return true;
-            }
-            element = element.NextElement;
-        }
-
-        value = default;
-        return false;
+        return LargeSetHelpers.TryGetValueFromStorage(item, _Storage, Capacity, EqualsFunction, HashCodeFunction, out value);
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public virtual bool Contains(T item)
+    public bool TryGetOrSetDefault(T item, out T value)
     {
-        return TryGetValue(item, out _);
+        long count = Count;
+        long previousCount = count;
+        bool found = LargeSetHelpers.TryGetOrAddToStorage(ref item, ref item, _Storage, _Capacity, ref count, EqualsFunction, HashCodeFunction, out value);
+        
+        if (!found && count > Constants.MaxLargeCollectionCount)
+        {
+            throw new InvalidOperationException($"Can not store more than {Constants.MaxLargeCollectionCount} items.");
+        }
+        
+        Count = count;
+
+        if (!found)
+        {
+            // Item was added, check if we need to extend
+            Extend();
+        }
+
+        return found;
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public bool TryGetOrSet(T searchItem, T valueIfNotFound, out T value)
+    {
+        long count = Count;
+        long previousCount = count;
+        bool found = LargeSetHelpers.TryGetOrAddToStorage(ref searchItem, ref valueIfNotFound, _Storage, _Capacity, ref count, EqualsFunction, HashCodeFunction, out value);
+        
+        if (!found && count > Constants.MaxLargeCollectionCount)
+        {
+            throw new InvalidOperationException($"Can not store more than {Constants.MaxLargeCollectionCount} items.");
+        }
+        
+        Count = count;
+
+        if (!found)
+        {
+            // Item was added, check if we need to extend
+            Extend();
+        }
+
+        return found;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public bool TryGetOrSet(T searchItem, Func<T> valueFactory, out T value)
+    {
+        if (valueFactory is null)
+        {
+            throw new ArgumentNullException(nameof(valueFactory));
+        }
+
+        long count = Count;
+        long previousCount = count;
+        bool found = LargeSetHelpers.TryGetOrAddToStorageWithFactory(searchItem, valueFactory, _Storage, _Capacity, ref count, EqualsFunction, HashCodeFunction, out value);
+        
+        if (!found && count > Constants.MaxLargeCollectionCount)
+        {
+            throw new InvalidOperationException($"Can not store more than {Constants.MaxLargeCollectionCount} items.");
+        }
+        
+        Count = count;
+
+        if (!found)
+        {
+            // Item was added, check if we need to extend
+            Extend();
+        }
+
+        return found;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public bool Contains(T item)
+    {
+        return LargeSetHelpers.ContainsInStorage(item, _Storage, Capacity, EqualsFunction, HashCodeFunction);
+    }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public IEnumerable<T> GetAll()
     {
-        long capacity = Capacity;
-
-        for (long i = 0L; i < capacity; i++)
-        {
-            SetElement element = _Storage[i];
-
-            while (element is not null)
-            {
-                yield return element.Item;
-                element = element.NextElement;
-            }
-        }
+        return LargeSetHelpers.GetAllFromStorage(_Storage, _Capacity);
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -448,152 +426,34 @@ public class LargeSet<T> : ILargeCollection<T>
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    protected void ExtendInternal()
+    private void Extend()
     {
-        if (LoadFactor <= MaxLoadFactor)
-        {
-            return;
-        }
-
-        long capacity = Capacity;
-
-        // As long as the used hash value only uses 32 bit it does not make sence to use more than 2^32-1 buckets
-        if (capacity >= uint.MaxValue)
-        {
-            return;
-        }
-
-        long newCapacity = StorageExtensions.GetGrownCapacity(capacity, CapacityGrowFactor, FixedCapacityGrowAmount, FixedCapacityGrowLimit);
-
-        // As long as the used hash value only uses 32 bit it does not make sence to use more than 2^32-1 buckets
-        if (newCapacity >= uint.MaxValue)
-        {
-            newCapacity = uint.MaxValue;
-        }
-
-        LargeArray<SetElement> newStorage = new(newCapacity);
-        long newStorageCount = 0L;
-        CopyStorageInternal(_Storage, newStorage, ref newStorageCount, EqualsFunction, HashCodeFunction, true);
-
-        _Storage = newStorage;
-        Count = newStorageCount;
+        long count = Count;
+        long capacity = _Capacity;
+        LargeSetHelpers.ExtendStorage(ref _Storage, ref capacity, ref count, CapacityGrowFactor, FixedCapacityGrowAmount, FixedCapacityGrowLimit, MaxLoadFactor, EqualsFunction, HashCodeFunction);
+        _Capacity = capacity;
+        Count = count;
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void Shrink()
     {
-        if (LoadFactor <= MinLoadFactor * MinLoadFactorTolerance)
-        {
-            return;
-        }
-
-        long newCapacity = (long)(Capacity * MinLoadFactor);
-        newCapacity = newCapacity > 0L ? newCapacity : 1L;
-
-        LargeArray<SetElement> newStorage = new(newCapacity);
-        long newStorageCount = 0L;
-        CopyStorageInternal(_Storage, newStorage, ref newStorageCount, EqualsFunction, HashCodeFunction, true);
-
-        _Storage = newStorage;
-        Count = newStorageCount;
-    }
-
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    protected static void CopyStorageInternal(LargeArray<SetElement> sourceStorage, LargeArray<SetElement> targetStorage, ref long targetCount, Func<T, T, bool> equalsFunction, Func<T, int> hashCodeFunction, bool clearSourceStorage)
-    {
-        long capacity = sourceStorage.Count;
-        for (long i = 0L; i < capacity; i++)
-        {
-            SetElement element = sourceStorage[i];
-
-            while (element is not null)
-            {
-                AddToStorageInternal(ref element.Item, targetStorage, ref targetCount, equalsFunction, hashCodeFunction);
-
-                SetElement nextElement = element.NextElement;
-                if (clearSourceStorage)
-                {
-                    element.NextElement = null;
-                }
-                element = nextElement;
-            }
-
-            if (clearSourceStorage)
-            {
-                sourceStorage[i] = null;
-            }
-        }
-    }
-
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    protected static long GetBucketIndexInternal(T item, long capacity, Func<T, int> hashCodeFunction)
-    {
-        ulong hash = unchecked((uint)hashCodeFunction.Invoke(item));
-        long bucketIndex = (long)(hash % (ulong)capacity);
-
-        return bucketIndex;
+        long count = Count;
+        long capacity = _Capacity;
+        LargeSetHelpers.ShrinkStorage(ref _Storage, ref capacity, ref count, MinLoadFactor, MinLoadFactorTolerance, EqualsFunction, HashCodeFunction);
+        _Capacity = capacity;
+        Count = count;
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void DoForEach(Action<T> action)
     {
-        if (action is null)
-        {
-            throw new ArgumentNullException(nameof(action));
-        }
-
-        long capacity = Capacity;
-
-        for (long i = 0L; i < capacity; i++)
-        {
-            SetElement element = _Storage[i];
-
-            while (element is not null)
-            {
-                ref T item = ref element.Item;
-                action.Invoke(item);
-                element = element.NextElement;
-            }
-        }
+        LargeSetHelpers.DoForEachInStorage(_Storage, _Capacity, action);
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void DoForEach<TUserData>(ActionWithUserData<T, TUserData> action, ref TUserData userData)
     {
-        if (action is null)
-        {
-            throw new ArgumentNullException(nameof(action));
-        }
-
-        long capacity = Capacity;
-
-        for (long i = 0L; i < capacity; i++)
-        {
-            SetElement element = _Storage[i];
-
-            while (element is not null)
-            {
-                ref T item = ref element.Item;
-                action.Invoke(item, ref userData);
-                element = element.NextElement;
-            }
-        }
-    }
-
-    [DebuggerDisplay("Item = {Item}")]
-    protected class SetElement
-    {
-        public T Item;
-        public SetElement NextElement;
-
-        public SetElement(T item, SetElement nextElement)
-        {
-            Item = item;
-            NextElement = nextElement;
-        }
-
-        public SetElement() : this(default, null) { }
-
-        public SetElement(T item) : this(item, null) { }
+        LargeSetHelpers.DoForEachInStorage(_Storage, _Capacity, action, ref userData);
     }
 }
