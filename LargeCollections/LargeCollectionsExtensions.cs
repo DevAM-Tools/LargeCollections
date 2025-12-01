@@ -1,4 +1,4 @@
-﻿/*
+/*
 MIT License
 SPDX-License-Identifier: MIT
 
@@ -24,9 +24,30 @@ SOFTWARE.
 */
 
 using System;
+using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 
 namespace LargeCollections;
+
+/// <summary>
+/// Provides default equality and hash code functions for use in collections.
+/// </summary>
+public static class DefaultFunctions<T>
+{
+    /// <summary>
+    /// Default equals function using <see cref="EqualityComparer{T}.Default"/>.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static bool DefaultEqualsFunction(T left, T right)
+        => EqualityComparer<T>.Default.Equals(left, right);
+
+    /// <summary>
+    /// Default hash code function using <see cref="EqualityComparer{T}.Default"/>.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static int DefaultHashCodeFunction(T item)
+        => item is not null ? EqualityComparer<T>.Default.GetHashCode(item) : 0;
+}
 
 public static class LargeCollectionsExtensions
 {

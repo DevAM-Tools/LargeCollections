@@ -1,4 +1,4 @@
-﻿/*
+/*
 MIT License
 SPDX-License-Identifier: MIT
 
@@ -24,6 +24,9 @@ SOFTWARE.
 */
 
 using System;
+#if NETSTANDARD2_1_OR_GREATER || NETCOREAPP2_1_OR_GREATER || NET5_0_OR_GREATER
+using System.Buffers;
+#endif
 using System.IO;
 using System.Runtime.CompilerServices;
 
@@ -32,53 +35,15 @@ namespace LargeCollections.IO;
 public static class StreamExtensions
 {
     /// <summary>
-    /// Writes all bytes from the <paramref name="source"/> to the <paramref name="stream"/>.
-    /// </summary>
-    /// <param name="stream">The stream where the bytes will be written to.</param>
-    /// <param name="source">The source where the bytes will be read from.</param>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static void Write(this Stream stream, IReadOnlyLargeArray<byte> source)
-    {
-        if (source is null)
-        {
-            throw new ArgumentNullException(nameof(source));
-        }
-
-        stream.Write(source, 0L, source.Count);
-    }
-
-    /// <summary>
-    /// Writes bytes from the <paramref name="source"/> to the <paramref name="stream"/> starting at <paramref name="offset"/>.
+    /// Writes bytes from the <paramref name="source"/> to the <paramref name="stream"/>.
     /// </summary>
     /// <param name="stream">The stream where the bytes will be written to.</param>
     /// <param name="source">The source where the bytes will be read from.</param>
     /// <param name="offset">The offset where the first byte will be read from.</param>
+    /// <param name="count">The number of bytes that will be written. If null, writes all remaining bytes from <paramref name="offset"/>.</param>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static void Write(this Stream stream, IReadOnlyLargeArray<byte> source, long offset)
+    public static void Write(this Stream stream, IReadOnlyLargeArray<byte> source, long offset = 0L, long? count = null)
     {
-        if (source is null)
-        {
-            throw new ArgumentNullException(nameof(source));
-        }
-
-        stream.Write(source, offset, source.Count - offset);
-    }
-
-    /// <summary>
-    /// Writes <paramref name="count"/> bytes from the <paramref name="source"/> to the <paramref name="stream"/> starting at <paramref name="offset"/>.
-    /// </summary>
-    /// <param name="stream">The stream where the bytes will be written to.</param>
-    /// <param name="source">The source where the bytes will be read from.</param>
-    /// <param name="offset">The offset where the first byte will be read from.</param>
-    /// <param name="count">The number of bytes that will be written.</param>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static void Write(this Stream stream, IReadOnlyLargeArray<byte> source, long offset, long count)
-    {
-        if (count == 0L)
-        {
-            return;
-        }
-
         if (stream is null)
         {
             throw new ArgumentNullException(nameof(stream));
@@ -89,16 +54,22 @@ public static class StreamExtensions
             throw new ArgumentNullException(nameof(source));
         }
 
-        StorageExtensions.CheckRange(offset, count, source.Count);
+        long actualCount = count ?? source.Count - offset;
+        if (actualCount == 0L)
+        {
+            return;
+        }
+
+        StorageExtensions.CheckRange(offset, actualCount, source.Count);
 
 #if NETSTANDARD2_1_OR_GREATER || NETCOREAPP3_0_OR_GREATER || NET5_0_OR_GREATER
 
         Span<byte> buffer = stackalloc byte[2048];
         long currentCount = 0L;
 
-        while (currentCount < count)
+        while (currentCount < actualCount)
         {
-            int chunkSize = (int)Math.Min(buffer.Length, count - currentCount);
+            int chunkSize = (int)Math.Min(buffer.Length, actualCount - currentCount);
             Span<byte> currentBuffer = buffer.Slice(0, chunkSize);
             source.CopyToSpan(currentBuffer, offset + currentCount, chunkSize);
             stream.Write(currentBuffer);
@@ -110,9 +81,9 @@ public static class StreamExtensions
         byte[] buffer = new byte[8192];
         long currentCount = 0L;
 
-        while (currentCount < count)
+        while (currentCount < actualCount)
         {
-            int chunkSize = (int)Math.Min(buffer.Length, count - currentCount);
+            int chunkSize = (int)Math.Min(buffer.Length, actualCount - currentCount);
             source.CopyToArray(buffer, offset + currentCount, 0, chunkSize);
             stream.Write(buffer, 0, chunkSize);
 
@@ -123,53 +94,15 @@ public static class StreamExtensions
     }
 
     /// <summary>
-    /// Writes all bytes from the <paramref name="source"/> to the <paramref name="stream"/>.
-    /// </summary>
-    /// <param name="stream">The stream where the bytes will be written to.</param>
-    /// <param name="source">The source where the bytes will be read from.</param>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static void Write(this Stream stream, LargeArray<byte> source)
-    {
-        if (source is null)
-        {
-            throw new ArgumentNullException(nameof(source));
-        }
-
-        stream.Write(source, 0L, source.Count);
-    }
-
-    /// <summary>
-    /// Writes all bytes from the <paramref name="source"/> to the <paramref name="stream"/>.
+    /// Writes bytes from the <paramref name="source"/> to the <paramref name="stream"/>.
     /// </summary>
     /// <param name="stream">The stream where the bytes will be written to.</param>
     /// <param name="source">The source where the bytes will be read from.</param>
     /// <param name="offset">The offset where the first byte will be read from.</param>
+    /// <param name="count">The number of bytes that will be written. If null, writes all remaining bytes from <paramref name="offset"/>.</param>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static void Write(this Stream stream, LargeArray<byte> source, long offset)
+    public static void Write(this Stream stream, LargeArray<byte> source, long offset = 0L, long? count = null)
     {
-        if (source is null)
-        {
-            throw new ArgumentNullException(nameof(source));
-        }
-
-        stream.Write(source, offset, source.Count - offset);
-    }
-
-    /// <summary>
-    /// Writes <paramref name="count"/> bytes from the <paramref name="source"/> to the <paramref name="stream"/> starting at <paramref name="offset"/>.
-    /// </summary>
-    /// <param name="stream">The stream where the bytes will be written to.</param>
-    /// <param name="source">The source where the bytes will be read from.</param>
-    /// <param name="offset">The offset where the first byte will be read from.</param>
-    /// <param name="count">The number of bytes that will be written.</param>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static void Write(this Stream stream, LargeArray<byte> source, long offset, long count)
-    {
-        if (count == 0L)
-        {
-            return;
-        }
-
         if (stream is null)
         {
             throw new ArgumentNullException(nameof(stream));
@@ -180,67 +113,35 @@ public static class StreamExtensions
             throw new ArgumentNullException(nameof(source));
         }
 
-        StorageExtensions.CheckRange(offset, count, source.Count);
-
-        if (stream is LargeWritableMemoryStream largeWritableMemoryStream)
-        {
-            largeWritableMemoryStream.Storage.AddRange(source, offset, count);
-        }
-        else
-        {
-            byte[][] storage = source.GetStorage();
-            storage.StorageWriteToStream(stream, offset, count);
-        }
-    }
-
-    /// <summary>
-    /// Writes all bytes from the <paramref name="source"/> to the <paramref name="stream"/>.
-    /// </summary>
-    /// <param name="stream">The stream where the bytes will be written to.</param>
-    /// <param name="source">The source where the bytes will be read from.</param>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static void Write(this Stream stream, LargeList<byte> source)
-    {
-        if (source is null)
-        {
-            throw new ArgumentNullException(nameof(source));
-        }
-
-        stream.Write(source, 0L, source.Count);
-    }
-
-    /// <summary>
-    /// Writes all bytes from the <paramref name="source"/> to the <paramref name="stream"/>.
-    /// </summary>
-    /// <param name="stream">The stream where the bytes will be written to.</param>
-    /// <param name="source">The source where the bytes will be read from.</param>
-    /// <param name="offset">The offset where the first byte will be read from.</param>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static void Write(this Stream stream, LargeList<byte> source, long offset)
-    {
-        if (source is null)
-        {
-            throw new ArgumentNullException(nameof(source));
-        }
-
-        stream.Write(source, offset, source.Count - offset);
-    }
-
-    /// <summary>
-    /// Writes <paramref name="count"/> bytes from the <paramref name="source"/> to the <paramref name="stream"/> starting at <paramref name="offset"/>.
-    /// </summary>
-    /// <param name="stream">The stream where the bytes will be written to.</param>
-    /// <param name="source">The source where the bytes will be read from.</param>
-    /// <param name="offset">The offset where the first byte will be read from.</param>
-    /// <param name="count">The number of bytes that will be written.</param>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static void Write(this Stream stream, LargeList<byte> source, long offset, long count)
-    {
-        if (count == 0L)
+        long actualCount = count ?? source.Count - offset;
+        if (actualCount == 0L)
         {
             return;
         }
 
+        StorageExtensions.CheckRange(offset, actualCount, source.Count);
+
+        if (stream is LargeWritableMemoryStream largeWritableMemoryStream)
+        {
+            largeWritableMemoryStream.Storage.AddRange(source, offset, actualCount);
+        }
+        else
+        {
+            byte[][] storage = source.GetStorage();
+            storage.StorageWriteToStream(stream, offset, actualCount);
+        }
+    }
+
+    /// <summary>
+    /// Writes bytes from the <paramref name="source"/> to the <paramref name="stream"/>.
+    /// </summary>
+    /// <param name="stream">The stream where the bytes will be written to.</param>
+    /// <param name="source">The source where the bytes will be read from.</param>
+    /// <param name="offset">The offset where the first byte will be read from.</param>
+    /// <param name="count">The number of bytes that will be written. If null, writes all remaining bytes from <paramref name="offset"/>.</param>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static void Write(this Stream stream, LargeList<byte> source, long offset = 0L, long? count = null)
+    {
         if (stream is null)
         {
             throw new ArgumentNullException(nameof(stream));
@@ -251,16 +152,22 @@ public static class StreamExtensions
             throw new ArgumentNullException(nameof(source));
         }
 
-        StorageExtensions.CheckRange(offset, count, source.Count);
+        long actualCount = count ?? source.Count - offset;
+        if (actualCount == 0L)
+        {
+            return;
+        }
+
+        StorageExtensions.CheckRange(offset, actualCount, source.Count);
 
         if (stream is LargeWritableMemoryStream largeWritableMemoryStream)
         {
-            largeWritableMemoryStream.Storage.AddRange(source, offset, count);
+            largeWritableMemoryStream.Storage.AddRange(source, offset, actualCount);
         }
         else
         {
             byte[][] storage = source.GetStorage();
-            storage.StorageWriteToStream(stream, offset, count);
+            storage.StorageWriteToStream(stream, offset, actualCount);
         }
     }
 
@@ -315,35 +222,15 @@ public static class StreamExtensions
     }
 
     /// <summary>
-    /// Reads all bytes from the <paramref name="stream"/> to the <paramref name="target"/>.
-    /// </summary>
-    /// <param name="stream">The stream where the bytes will be read from.</param>
-    /// <param name="target">The target where the bytes will be written to.</param>
-    /// <returns>The total number of bytes read.</returns>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static long Read(this Stream stream, ILargeArray<byte> target)
-    {
-        if (stream is null)
-        {
-            throw new ArgumentNullException(nameof(stream));
-        }
-        if (target is null)
-        {
-            throw new ArgumentNullException(nameof(target));
-        }
-
-        return stream.Read(target, 0L, target.Count);
-    }
-
-    /// <summary>
-    /// Reads bytes from the <paramref name="stream"/> to the <paramref name="target"/> starting at <paramref name="offset"/>.
+    /// Reads bytes from the <paramref name="stream"/> to the <paramref name="target"/>.
     /// </summary>
     /// <param name="stream">The stream where the bytes will be read from.</param>
     /// <param name="target">The target where the bytes will be written to.</param>
     /// <param name="offset">The offset where the first byte will be written to.</param>
+    /// <param name="count">The number of bytes that will be read. If null, reads to fill the remaining capacity from <paramref name="offset"/>.</param>
     /// <returns>The total number of bytes read.</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static long Read(this Stream stream, ILargeArray<byte> target, long offset)
+    public static long Read(this Stream stream, ILargeArray<byte> target, long offset = 0L, long? count = null)
     {
         if (stream is null)
         {
@@ -354,57 +241,30 @@ public static class StreamExtensions
             throw new ArgumentNullException(nameof(target));
         }
 
-        StorageExtensions.CheckIndex(offset, target.Count);
-
-        return stream.Read(target, offset, target.Count - offset);
-    }
-
-    /// <summary>
-    /// Reads <paramref name="count"/> bytes from the <paramref name="stream"/> to the <paramref name="target"/> starting at <paramref name="offset"/>.
-    /// </summary>
-    /// <param name="stream">The stream where the bytes will be read from.</param>
-    /// <param name="target">The target where the bytes will be written to.</param>
-    /// <param name="offset">The offset where the first byte will be written to.</param>
-    /// <param name="count">The number of bytes that will be read.</param>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static long Read(this Stream stream, ILargeArray<byte> target, long offset, long count)
-    {
-        if (count == 0L)
+        long actualCount = count ?? target.Count - offset;
+        if (actualCount == 0L)
         {
             return 0L;
         }
 
-        if (stream is null)
-        {
-            throw new ArgumentNullException(nameof(stream));
-        }
-        if (target is null)
-        {
-            throw new ArgumentNullException(nameof(target));
-        }
-        StorageExtensions.CheckRange(offset, count, target.Count);
-
-        if (count == 0L)
-        {
-            return 0L;
-        }
+        StorageExtensions.CheckRange(offset, actualCount, target.Count);
 
         if (target is LargeArray<byte> largeArray)
         {
             byte[][] storage = largeArray.GetStorage();
-            return storage.StorageReadFromStream(stream, offset, count);
+            return storage.StorageReadFromStream(stream, offset, actualCount);
         }
         else if (target is LargeList<byte> largeList)
         {
             byte[][] storage = largeList.GetStorage();
-            return storage.StorageReadFromStream(stream, offset, count);
+            return storage.StorageReadFromStream(stream, offset, actualCount);
         }
 #if NETSTANDARD2_1_OR_GREATER || NETCOREAPP3_0_OR_GREATER || NET5_0_OR_GREATER
         else
         {
             Span<byte> buffer = stackalloc byte[2048];
             long totalReadCount = 0L;
-            long remaining = count;
+            long remaining = actualCount;
 
             while (remaining > 0L)
             {
@@ -430,7 +290,7 @@ public static class StreamExtensions
         {
             byte[] buffer = new byte[8192];
             long totalReadCount = 0L;
-            long remaining = count;
+            long remaining = actualCount;
 
             while (remaining > 0L)
             {

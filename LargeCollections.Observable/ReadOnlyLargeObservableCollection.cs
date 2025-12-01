@@ -48,6 +48,7 @@ public class ReadOnlyLargeObservableCollection<T> : IReadOnlyLargeObservableColl
 
         _Inner.CollectionChanged += OnInnerCollectionChanged;
         _Inner.PropertyChanged += OnInnerPropertyChanged;
+        _Inner.Changed += OnInnerChanged;
     }
 
     private readonly IReadOnlyLargeObservableCollection<T> _Inner;
@@ -73,6 +74,9 @@ public class ReadOnlyLargeObservableCollection<T> : IReadOnlyLargeObservableColl
 
     public event NotifyCollectionChangedEventHandler CollectionChanged;
     public event PropertyChangedEventHandler PropertyChanged;
+
+    /// <inheritdoc/>
+    public event LargeCollectionChangedEventHandler<T> Changed;
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private void PublishChangedCount()
@@ -174,29 +178,77 @@ public class ReadOnlyLargeObservableCollection<T> : IReadOnlyLargeObservableColl
         }
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public long BinarySearch(T item, Func<T, T, int> comparer)
-        => _Inner.BinarySearch(item, comparer);
+    private void OnInnerChanged(object sender, in LargeCollectionChangedEventArgs<T> e)
+    {
+        if (Interlocked.CompareExchange(ref _SuspendNotificationsCounter, 0, 0) > 0)
+        {
+            return;
+        }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public long BinarySearch(T item, Func<T, T, int> comparer, long offset, long count)
-            => _Inner.BinarySearch(item, comparer, offset, count);
+        if (Changed != null)
+        {
+            if (_SuppressEventExceptions)
+            {
+                try
+                {
+                    Changed.Invoke(this, in e);
+                }
+                catch
+                {
+                    // Suppress exceptions if configured
+                }
+            }
+            else
+            {
+                Changed.Invoke(this, in e);
+            }
+        }
+    }
 
+    /// <summary>
+    /// Performs a binary search using a generic comparer for optimal performance through JIT devirtualization.
+    /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public bool Contains(T item, long offset, long count)
-        => _Inner.Contains(item, offset, count);
+    public long BinarySearch<TComparer>(T item, TComparer comparer, long? offset = null, long? count = null) where TComparer : IComparer<T>
+    {
+        if (_Inner is LargeObservableCollection<T> observable)
+        {
+            return observable.BinarySearch(item, comparer, offset, count);
+        }
+        throw new NotSupportedException($"Generic BinarySearch is not supported for inner type {_Inner.GetType().Name}. Use the delegate-based overload instead.");
+    }
+
+    /// <inheritdoc/>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public long BinarySearch(T item, long? offset = null, long? count = null)
+    {
+        if (_Inner is LargeObservableCollection<T> observable)
+        {
+            return observable.BinarySearch(item, offset, count);
+        }
+        throw new NotSupportedException($"BinarySearch is not supported for inner type {_Inner.GetType().Name}.");
+    }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public bool Contains(T item)
         => _Inner.Contains(item);
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public bool Contains(T item, Func<T, T, bool> equalsFunction)
-    => _Inner.Contains(item, equalsFunction);
+    public bool Contains(T item, long offset, long count)
+        => _Inner.Contains(item, offset, count);
 
+    /// <summary>
+    /// Determines whether the collection contains a specific item using a generic equality comparer for optimal performance.
+    /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public bool Contains(T item, long offset, long count, Func<T, T, bool> equalsFunction)
-        => _Inner.Contains(item, offset, count, equalsFunction);
+    public bool Contains<TComparer>(T item, ref TComparer comparer, long? offset = null, long? count = null) where TComparer : IEqualityComparer<T>
+    {
+        if (_Inner is LargeObservableCollection<T> observable)
+        {
+            return observable.Contains(item, ref comparer, offset, count);
+        }
+        throw new NotSupportedException($"Generic Contains is not supported for inner type {_Inner.GetType().Name}. Use the delegate-based overload instead.");
+    }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void CopyTo(ILargeArray<T> target, long sourceOffset, long targetOffset, long count)
@@ -216,20 +268,47 @@ public class ReadOnlyLargeObservableCollection<T> : IReadOnlyLargeObservableColl
         => _Inner.CopyToSpan(target, sourceOffset, count);
 #endif
 
-    public void DoForEach(Action<T> action, long offset, long count)
-        => _Inner.DoForEach(action, offset, count);
+    #region DoForEach Methods
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public void DoForEach<TUserData>(ActionWithUserData<T, TUserData> action, long offset, long count, ref TUserData userData)
-        => _Inner.DoForEach(action, offset, count, ref userData);
-
+    /// <summary>
+    /// Performs the <paramref name="action"/> with items of the collection.
+    /// </summary>
+    /// <param name="action">The function that will be called for each item.</param>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void DoForEach(Action<T> action)
         => _Inner.DoForEach(action);
 
+    /// <summary>
+    /// Performs the <paramref name="action"/> with items of the collection within the specified range.
+    /// </summary>
+    /// <param name="action">The function that will be called for each item.</param>
+    /// <param name="offset">Starting offset.</param>
+    /// <param name="count">Number of elements to process.</param>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public void DoForEach<TUserData>(ActionWithUserData<T, TUserData> action, ref TUserData userData)
-        => _Inner.DoForEach(action, ref userData);
+    public void DoForEach(Action<T> action, long offset, long count)
+        => _Inner.DoForEach(action, offset, count);
+
+    /// <summary>
+    /// Performs the action on items using an action for optimal performance.
+    /// </summary>
+    /// <typeparam name="TAction">A type implementing <see cref="ILargeAction{T}"/>.</typeparam>
+    /// <param name="action">The action instance passed by reference.</param>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public void DoForEach<TAction>(ref TAction action) where TAction : ILargeAction<T>
+        => _Inner.DoForEach(ref action);
+
+    /// <summary>
+    /// Performs the action on items using an action for optimal performance.
+    /// </summary>
+    /// <typeparam name="TAction">A type implementing <see cref="ILargeAction{T}"/>.</typeparam>
+    /// <param name="action">The action instance passed by reference.</param>
+    /// <param name="offset">Starting offset.</param>
+    /// <param name="count">Number of elements to process.</param>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public void DoForEach<TAction>(ref TAction action, long offset, long count) where TAction : ILargeAction<T>
+        => _Inner.DoForEach(ref action, offset, count);
+
+    #endregion
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public T Get(long index)
@@ -281,40 +360,43 @@ public class ReadOnlyLargeObservableCollection<T> : IReadOnlyLargeObservableColl
             // Unsubscribe from inner collection's events
             _Inner.CollectionChanged -= OnInnerCollectionChanged;
             _Inner.PropertyChanged -= OnInnerPropertyChanged;
+            _Inner.Changed -= OnInnerChanged;
         }
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public long IndexOf(T item)
-        => _Inner.IndexOf(item);
-
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public long IndexOf(T item, long offset, long count)
+    public long IndexOf(T item, long? offset = null, long? count = null)
         => _Inner.IndexOf(item, offset, count);
 
+    /// <summary>
+    /// Finds the index of the first occurrence of an item using a generic equality comparer for optimal performance.
+    /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public long IndexOf(T item, Func<T, T, bool> equalsFunction)
-        => _Inner.IndexOf(item, equalsFunction);
+    public long IndexOf<TComparer>(T item, ref TComparer comparer, long? offset = null, long? count = null) where TComparer : IEqualityComparer<T>
+    {
+        if (_Inner is LargeObservableCollection<T> observable)
+        {
+            return observable.IndexOf(item, ref comparer, offset, count);
+        }
+        throw new NotSupportedException($"Generic IndexOf is not supported for inner type {_Inner.GetType().Name}. Use the delegate-based overload instead.");
+    }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public long IndexOf(T item, long offset, long count, Func<T, T, bool> equalsFunction)
-        => _Inner.IndexOf(item, offset, count, equalsFunction);
-
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public long LastIndexOf(T item)
-        => _Inner.LastIndexOf(item);
-
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public long LastIndexOf(T item, long offset, long count)
+    public long LastIndexOf(T item, long? offset = null, long? count = null)
         => _Inner.LastIndexOf(item, offset, count);
 
+    /// <summary>
+    /// Finds the index of the last occurrence of an item using a generic equality comparer for optimal performance.
+    /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public long LastIndexOf(T item, Func<T, T, bool> equalsFunction)
-        => _Inner.LastIndexOf(item, equalsFunction);
-
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public long LastIndexOf(T item, long offset, long count, Func<T, T, bool> equalsFunction)
-         => _Inner.LastIndexOf(item, offset, count, equalsFunction);
+    public long LastIndexOf<TComparer>(T item, ref TComparer comparer, long? offset = null, long? count = null) where TComparer : IEqualityComparer<T>
+    {
+        if (_Inner is LargeObservableCollection<T> observable)
+        {
+            return observable.LastIndexOf(item, ref comparer, offset, count);
+        }
+        throw new NotSupportedException($"Generic LastIndexOf is not supported for inner type {_Inner.GetType().Name}. Use the delegate-based overload instead.");
+    }
 
     internal class NotificationSuspender : IDisposable
     {

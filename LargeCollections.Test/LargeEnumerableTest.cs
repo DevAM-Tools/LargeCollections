@@ -114,4 +114,75 @@ public class LargeEnumerableTest
         List<int> result = LargeEnumerable.Repeat(123, 1000000L).Take(3).ToList();
         await Assert.That(result).IsEquivalentTo(new[] { 123, 123, 123 });
     }
+
+    #region Edge Cases
+
+    [Test]
+    public async Task Range_WithStartCountStep_StepZero_ProducesInfiniteLoop_TakeFirst()
+    {
+        // With step=0, all values are the same (start value)
+        // This is valid behavior - just produces same value repeatedly
+        List<long> result = LargeEnumerable.Range(5, 3, 0).ToList();
+        await Assert.That(result).IsEquivalentTo(new long[] { 5, 5, 5 });
+    }
+
+    [Test]
+    public async Task Range_WithStartCountStep_SingleElement()
+    {
+        List<long> result = LargeEnumerable.Range(42, 1, 10).ToList();
+        await Assert.That(result).IsEquivalentTo(new long[] { 42 });
+    }
+
+    [Test]
+    public async Task Range_WithStartCountStep_NegativeStart()
+    {
+        List<long> result = LargeEnumerable.Range(-10, 5, 3).ToList();
+        await Assert.That(result).IsEquivalentTo(new long[] { -10, -7, -4, -1, 2 });
+    }
+
+    [Test]
+    public async Task Range_DoesNotAllocateAllAtOnce()
+    {
+        // This should not cause OutOfMemory because it's lazy
+        IEnumerable<long> range = LargeEnumerable.Range(0, 1_000_000_000L, 1);
+
+        // Only take first 5 elements
+        List<long> result = range.Take(5).ToList();
+        await Assert.That(result).IsEquivalentTo(new long[] { 0, 1, 2, 3, 4 });
+    }
+
+    [Test]
+    public async Task Repeat_DoesNotAllocateAllAtOnce()
+    {
+        // This should not cause OutOfMemory because it's lazy
+        IEnumerable<string> repeated = LargeEnumerable.Repeat("x", 1_000_000_000L);
+
+        // Only take first 3 elements
+        List<string> result = repeated.Take(3).ToList();
+        await Assert.That(result).IsEquivalentTo(new[] { "x", "x", "x" });
+    }
+
+    [Test]
+    public async Task Range_CanBeEnumeratedMultipleTimes()
+    {
+        IEnumerable<long> range = LargeEnumerable.Range(0, 3, 1);
+
+        List<long> first = range.ToList();
+        List<long> second = range.ToList();
+
+        await Assert.That(first).IsEquivalentTo(second);
+    }
+
+    [Test]
+    public async Task Repeat_CanBeEnumeratedMultipleTimes()
+    {
+        IEnumerable<int> repeated = LargeEnumerable.Repeat(42, 3);
+
+        List<int> first = repeated.ToList();
+        List<int> second = repeated.ToList();
+
+        await Assert.That(first).IsEquivalentTo(second);
+    }
+
+    #endregion
 }

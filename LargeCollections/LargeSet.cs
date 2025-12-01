@@ -1,4 +1,4 @@
-﻿/*
+/*
 MIT License
 SPDX-License-Identifier: MIT
 
@@ -33,42 +33,24 @@ namespace LargeCollections;
 
 /// <summary>
 /// A mutable set of <typeparamref name="T"/> that can store up to <see cref="Constants.MaxLargeCollectionCount"/> elements.
-/// Sets are hash based.
+/// Sets are hash based. This version uses a struct comparer type parameter for maximum JIT inlining performance.
 /// </summary>
+/// <typeparam name="T">The type of elements in the set.</typeparam>
+/// <typeparam name="TComparer">The type of equality comparer. Use a struct implementing <see cref="IEqualityComparer{T}"/> for best performance.</typeparam>
 [DebuggerDisplay("LargeSet: Count = {Count}")]
-public class LargeSet<T> : ILargeCollection<T>
+public class LargeSet<T, TComparer> : ILargeCollection<T> where TComparer : IEqualityComparer<T>
 {
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static bool DefaultEqualsFunction(T left, T right)
-    {
-        bool result = (left is null && right is null) || (left is not null && left.Equals(right));
-        return result;
-    }
-
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static int DefaultHashCodeFunction(T item)
-    {
-        int result = item is null ? 0 : item.GetHashCode();
-        return result;
-    }
-
     private SetElement<T>[][] _Storage = null;
     private long _Capacity = 0L;
+    private TComparer _comparer;
 
-    private readonly Func<T, T, bool> _equalsFunction;
-    private readonly Func<T, int> _hashCodeFunction;
-
-    public Func<T, T, bool> EqualsFunction
+    /// <summary>
+    /// Gets the equality comparer used by this set.
+    /// </summary>
+    public TComparer Comparer
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        get => _equalsFunction;
-    }
-
-
-    public Func<T, int> HashCodeFunction
-    {
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        get => _hashCodeFunction;
+        get => _comparer;
     }
 
     public double CapacityGrowFactor
@@ -111,7 +93,6 @@ public class LargeSet<T> : ILargeCollection<T>
 
     public readonly double MinLoadFactor;
     public readonly double MaxLoadFactor;
-
     public readonly double MinLoadFactorTolerance;
 
     public double LoadFactor
@@ -120,8 +101,18 @@ public class LargeSet<T> : ILargeCollection<T>
         get => (double)Count / (double)Capacity;
     }
 
-    public LargeSet(Func<T, T, bool> equalsFunction = null,
-        Func<T, int> hashCodeFunction = null,
+    /// <summary>
+    /// Creates a new LargeSet with the specified comparer.
+    /// </summary>
+    /// <param name="comparer">The equality comparer to use. For best performance, use a struct type.</param>
+    /// <param name="capacity">Initial bucket capacity.</param>
+    /// <param name="capacityGrowFactor">Factor by which capacity grows when needed.</param>
+    /// <param name="fixedCapacityGrowAmount">Fixed amount to grow capacity by for small sets.</param>
+    /// <param name="fixedCapacityGrowLimit">Capacity limit below which fixed growth is used.</param>
+    /// <param name="minLoadFactor">Minimum load factor before shrinking.</param>
+    /// <param name="maxLoadFactor">Maximum load factor before growing.</param>
+    /// <param name="minLoadFactorTolerance">Tolerance for minimum load factor.</param>
+    public LargeSet(TComparer comparer,
         long capacity = 1L,
         double capacityGrowFactor = Constants.DefaultCapacityGrowFactor,
         long fixedCapacityGrowAmount = Constants.DefaultFixedCapacityGrowAmount,
@@ -130,6 +121,10 @@ public class LargeSet<T> : ILargeCollection<T>
         double maxLoadFactor = Constants.DefaultMaxLoadFactor,
         double minLoadFactorTolerance = Constants.DefaultMinLoadFactorTolerance)
     {
+        if (comparer is null)
+        {
+            throw new ArgumentNullException(nameof(comparer));
+        }
         if (capacity <= 0L || capacity > Constants.MaxLargeCollectionCount)
         {
             throw new ArgumentOutOfRangeException(nameof(capacity));
@@ -159,8 +154,7 @@ public class LargeSet<T> : ILargeCollection<T>
             throw new ArgumentOutOfRangeException(nameof(minLoadFactorTolerance));
         }
 
-        _equalsFunction = equalsFunction ?? DefaultEqualsFunction;
-        _hashCodeFunction = hashCodeFunction ?? DefaultHashCodeFunction;
+        _comparer = comparer;
 
         _Storage = StorageExtensions.StorageCreate<SetElement<T>>(capacity);
         _Capacity = capacity;
@@ -168,15 +162,11 @@ public class LargeSet<T> : ILargeCollection<T>
         Count = 0L;
 
         CapacityGrowFactor = capacityGrowFactor;
-
         FixedCapacityGrowAmount = fixedCapacityGrowAmount;
-
         FixedCapacityGrowLimit = fixedCapacityGrowLimit;
 
         MinLoadFactor = minLoadFactor;
-
         MaxLoadFactor = maxLoadFactor;
-
         MinLoadFactorTolerance = minLoadFactorTolerance;
     }
 
@@ -185,15 +175,15 @@ public class LargeSet<T> : ILargeCollection<T>
     {
         long count = Count;
         long previousCount = count;
-        LargeSetHelpers.AddToStorage(ref item, _Storage, _Capacity, ref count, EqualsFunction, HashCodeFunction);
-        
+
+        LargeSetHelpers.AddToStorage(ref item, _Storage, _Capacity, ref count, ref _comparer);
+
         if (count > previousCount && count > Constants.MaxLargeCollectionCount)
         {
             throw new InvalidOperationException($"Can not store more than {Constants.MaxLargeCollectionCount} items.");
         }
-        
-        Count = count;
 
+        Count = count;
         Extend();
     }
 
@@ -221,10 +211,6 @@ public class LargeSet<T> : ILargeCollection<T>
         }
     }
 
-    /// <summary>
-    /// Adds a range of items from a large array to the set.
-    /// </summary>
-    /// <param name="items">The large array of items to add.</param>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void AddRange(IReadOnlyLargeArray<T> items)
     {
@@ -236,11 +222,6 @@ public class LargeSet<T> : ILargeCollection<T>
         AddRange(items, 0L, items.Count);
     }
 
-    /// <summary>
-    /// Adds a range of items from a large array to the set.
-    /// </summary>
-    /// <param name="items">The large array of items to add.</param>
-    /// <param name="offset">The offset in the large array to start adding from.</param>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void AddRange(IReadOnlyLargeArray<T> items, long offset)
     {
@@ -252,13 +233,6 @@ public class LargeSet<T> : ILargeCollection<T>
         AddRange(items, offset, items.Count - offset);
     }
 
-
-    /// <summary>
-    /// Adds a range of items from a large array to the set.
-    /// </summary>
-    /// <param name="items">The large array of items to add.</param>
-    /// <param name="offset">The offset in the large array to start adding from.</param>
-    /// <param name="count">The number of items to add.</param>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void AddRange(IReadOnlyLargeArray<T> items, long offset, long count)
     {
@@ -302,7 +276,7 @@ public class LargeSet<T> : ILargeCollection<T>
     public bool Remove(T item, out T removedItem)
     {
         long count = Count;
-        bool result = LargeSetHelpers.RemoveFromStorage(item, _Storage, ref count, Capacity, EqualsFunction, HashCodeFunction, out removedItem);
+        bool result = LargeSetHelpers.RemoveFromStorage(ref item, _Storage, Capacity, ref count, ref _comparer, out removedItem);
         Count = count;
 
         if (result)
@@ -324,26 +298,24 @@ public class LargeSet<T> : ILargeCollection<T>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public bool TryGetValue(T item, out T value)
     {
-        return LargeSetHelpers.TryGetValueFromStorage(item, _Storage, Capacity, EqualsFunction, HashCodeFunction, out value);
+        return LargeSetHelpers.TryGetValueFromStorage(ref item, _Storage, Capacity, ref _comparer, out value);
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public bool TryGetOrSetDefault(T item, out T value)
     {
         long count = Count;
-        long previousCount = count;
-        bool found = LargeSetHelpers.TryGetOrAddToStorage(ref item, ref item, _Storage, _Capacity, ref count, EqualsFunction, HashCodeFunction, out value);
-        
+        bool found = LargeSetHelpers.TryGetOrAddToStorage(ref item, ref item, _Storage, _Capacity, ref count, ref _comparer, out value);
+
         if (!found && count > Constants.MaxLargeCollectionCount)
         {
             throw new InvalidOperationException($"Can not store more than {Constants.MaxLargeCollectionCount} items.");
         }
-        
+
         Count = count;
 
         if (!found)
         {
-            // Item was added, check if we need to extend
             Extend();
         }
 
@@ -354,19 +326,17 @@ public class LargeSet<T> : ILargeCollection<T>
     public bool TryGetOrSet(T searchItem, T valueIfNotFound, out T value)
     {
         long count = Count;
-        long previousCount = count;
-        bool found = LargeSetHelpers.TryGetOrAddToStorage(ref searchItem, ref valueIfNotFound, _Storage, _Capacity, ref count, EqualsFunction, HashCodeFunction, out value);
-        
+        bool found = LargeSetHelpers.TryGetOrAddToStorage(ref searchItem, ref valueIfNotFound, _Storage, _Capacity, ref count, ref _comparer, out value);
+
         if (!found && count > Constants.MaxLargeCollectionCount)
         {
             throw new InvalidOperationException($"Can not store more than {Constants.MaxLargeCollectionCount} items.");
         }
-        
+
         Count = count;
 
         if (!found)
         {
-            // Item was added, check if we need to extend
             Extend();
         }
 
@@ -382,19 +352,17 @@ public class LargeSet<T> : ILargeCollection<T>
         }
 
         long count = Count;
-        long previousCount = count;
-        bool found = LargeSetHelpers.TryGetOrAddToStorageWithFactory(searchItem, valueFactory, _Storage, _Capacity, ref count, EqualsFunction, HashCodeFunction, out value);
-        
+        bool found = LargeSetHelpers.TryGetOrAddToStorageWithFactory(ref searchItem, valueFactory, _Storage, _Capacity, ref count, ref _comparer, out value);
+
         if (!found && count > Constants.MaxLargeCollectionCount)
         {
             throw new InvalidOperationException($"Can not store more than {Constants.MaxLargeCollectionCount} items.");
         }
-        
+
         Count = count;
 
         if (!found)
         {
-            // Item was added, check if we need to extend
             Extend();
         }
 
@@ -404,7 +372,7 @@ public class LargeSet<T> : ILargeCollection<T>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public bool Contains(T item)
     {
-        return LargeSetHelpers.ContainsInStorage(item, _Storage, Capacity, EqualsFunction, HashCodeFunction);
+        return LargeSetHelpers.ContainsInStorage(ref item, _Storage, Capacity, ref _comparer);
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -430,7 +398,7 @@ public class LargeSet<T> : ILargeCollection<T>
     {
         long count = Count;
         long capacity = _Capacity;
-        LargeSetHelpers.ExtendStorage(ref _Storage, ref capacity, ref count, CapacityGrowFactor, FixedCapacityGrowAmount, FixedCapacityGrowLimit, MaxLoadFactor, EqualsFunction, HashCodeFunction);
+        LargeSetHelpers.ExtendStorage(ref _Storage, ref capacity, ref count, CapacityGrowFactor, FixedCapacityGrowAmount, FixedCapacityGrowLimit, MaxLoadFactor, ref _comparer);
         _Capacity = capacity;
         Count = count;
     }
@@ -440,20 +408,33 @@ public class LargeSet<T> : ILargeCollection<T>
     {
         long count = Count;
         long capacity = _Capacity;
-        LargeSetHelpers.ShrinkStorage(ref _Storage, ref capacity, ref count, MinLoadFactor, MinLoadFactorTolerance, EqualsFunction, HashCodeFunction);
+        LargeSetHelpers.ShrinkStorage(ref _Storage, ref capacity, ref count, MinLoadFactor, MinLoadFactorTolerance, ref _comparer);
         _Capacity = capacity;
         Count = count;
     }
 
+    #region DoForEach Methods
+
+    /// <summary>
+    /// Performs the <paramref name="action"/> with items of the set.
+    /// </summary>
+    /// <param name="action">The function that will be called for each item.</param>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void DoForEach(Action<T> action)
     {
         LargeSetHelpers.DoForEachInStorage(_Storage, _Capacity, action);
     }
 
+    /// <summary>
+    /// Performs the action on items using an action for optimal performance.
+    /// </summary>
+    /// <typeparam name="TAction">A type implementing <see cref="ILargeAction{T}"/>.</typeparam>
+    /// <param name="action">The action instance passed by reference.</param>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public void DoForEach<TUserData>(ActionWithUserData<T, TUserData> action, ref TUserData userData)
+    public void DoForEach<TAction>(ref TAction action) where TAction : ILargeAction<T>
     {
-        LargeSetHelpers.DoForEachInStorage(_Storage, _Capacity, action, ref userData);
+        LargeSetHelpers.DoForEachInStorage(_Storage, _Capacity, ref action);
     }
+
+    #endregion
 }

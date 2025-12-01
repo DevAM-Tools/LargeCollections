@@ -186,23 +186,42 @@ public readonly struct ReadOnlyLargeSpan<T> : IReadOnlyLargeArray<T>
         }
     }
 
+    /// <summary>
+    /// Performs a binary search using a generic comparer for optimal performance through JIT devirtualization.
+    /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public long BinarySearch(T item, Func<T, T, int> comparer)
+    public long BinarySearch<TComparer>(T item, TComparer comparer, long? offset = null, long? count = null) where TComparer : IComparer<T>
     {
         IReadOnlyLargeArray<T> inner = EnsureInner();
-        long result = inner.BinarySearch(item, comparer, _Start, _Count);
-        return result;
+        long actualOffset = offset ?? 0L;
+        long actualCount = count ?? (_Count - actualOffset);
+        StorageExtensions.CheckRange(actualOffset, actualCount, _Count);
+        long start = _Start + actualOffset;
+        long result;
+        if (inner is LargeArray<T> largeArray)
+        {
+            result = largeArray.BinarySearch(item, comparer, start, actualCount);
+        }
+        else if (inner is LargeList<T> largeList)
+        {
+            result = largeList.BinarySearch(item, comparer, start, actualCount);
+        }
+        else
+        {
+            throw new NotSupportedException($"Generic BinarySearch is not supported for inner type {inner.GetType().Name}. Use the delegate-based overload instead.");
+        }
+        return result >= 0L ? result - _Start : result;
+    }
+
+    /// <inheritdoc/>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public long BinarySearch(T item, long? offset = null, long? count = null)
+    {
+        return BinarySearch(item, Comparer<T>.Default, offset, count);
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public long BinarySearch(T item, Func<T, T, int> comparer, long offset, long count)
-    {
-        IReadOnlyLargeArray<T> inner = EnsureInner();
-        StorageExtensions.CheckRange(offset, count, _Count);
-        long start = _Start + offset;
-        long result = inner.BinarySearch(item, comparer, start, count);
-        return result;
-    }
+    public bool Contains(T item) => Contains(item, 0L, _Count);
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public bool Contains(T item, long offset, long count)
@@ -214,30 +233,27 @@ public readonly struct ReadOnlyLargeSpan<T> : IReadOnlyLargeArray<T>
         return result;
     }
 
+    /// <summary>
+    /// Determines whether the span contains a specific item using a generic equality comparer for optimal performance.
+    /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public bool Contains(T item, Func<T, T, bool> equalsFunction)
+    public bool Contains<TComparer>(T item, ref TComparer comparer, long? offset = null, long? count = null) where TComparer : IEqualityComparer<T>
     {
         IReadOnlyLargeArray<T> inner = EnsureInner();
-        bool result = inner.Contains(item, _Start, _Count, equalsFunction);
-        return result;
-    }
-
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public bool Contains(T item, long offset, long count, Func<T, T, bool> equalsFunction)
-    {
-        IReadOnlyLargeArray<T> inner = EnsureInner();
-        StorageExtensions.CheckRange(offset, count, _Count);
-        long start = _Start + offset;
-        bool result = inner.Contains(item, start, count, equalsFunction);
-        return result;
-    }
-
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public bool Contains(T item)
-    {
-        IReadOnlyLargeArray<T> inner = EnsureInner();
-        bool result = inner.Contains(item, _Start, _Count);
-        return result;
+        long actualOffset = offset ?? 0L;
+        long actualCount = count ?? (_Count - actualOffset);
+        StorageExtensions.CheckRange(actualOffset, actualCount, _Count);
+        if (actualCount == 0L) return false;
+        long start = _Start + actualOffset;
+        if (inner is LargeArray<T> largeArray)
+        {
+            return largeArray.Contains(item, ref comparer, start, actualCount);
+        }
+        if (inner is LargeList<T> largeList)
+        {
+            return largeList.Contains(item, ref comparer, start, actualCount);
+        }
+        throw new NotSupportedException($"Generic Contains is not supported for inner type {inner.GetType().Name}. Use the delegate-based overload instead.");
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -315,37 +331,67 @@ public readonly struct ReadOnlyLargeSpan<T> : IReadOnlyLargeArray<T>
     }
 #endif
 
+    #region DoForEach Methods
+
+    /// <summary>
+    /// Performs the <paramref name="action"/> with items of the span.
+    /// </summary>
+    /// <param name="action">The function that will be called for each item.</param>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public void DoForEach(Action<T> action) => DoForEach(action, 0L, _Count);
+
+    /// <summary>
+    /// Performs the <paramref name="action"/> with items of the span within the specified range.
+    /// </summary>
+    /// <param name="action">The function that will be called for each item.</param>
+    /// <param name="offset">Starting offset within the span.</param>
+    /// <param name="count">Number of elements to process.</param>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void DoForEach(Action<T> action, long offset, long count)
     {
         IReadOnlyLargeArray<T> inner = EnsureInner();
+        
+        if (count == 0L)
+        {
+            return;
+        }
+
         StorageExtensions.CheckRange(offset, count, _Count);
         long start = _Start + offset;
         inner.DoForEach(action, start, count);
     }
 
+    /// <summary>
+    /// Performs the action on items using an action for optimal performance.
+    /// </summary>
+    /// <typeparam name="TAction">A type implementing <see cref="ILargeAction{T}"/>.</typeparam>
+    /// <param name="action">The action instance passed by reference.</param>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public void DoForEach<TUserData>(ActionWithUserData<T, TUserData> action, long offset, long count, ref TUserData userData)
+    public void DoForEach<TAction>(ref TAction action) where TAction : ILargeAction<T> => DoForEach(ref action, 0L, _Count);
+
+    /// <summary>
+    /// Performs the action on items using an action for optimal performance.
+    /// </summary>
+    /// <typeparam name="TAction">A type implementing <see cref="ILargeAction{T}"/>.</typeparam>
+    /// <param name="action">The action instance passed by reference.</param>
+    /// <param name="offset">Starting offset within the span.</param>
+    /// <param name="count">Number of elements to process.</param>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public void DoForEach<TAction>(ref TAction action, long offset, long count) where TAction : ILargeAction<T>
     {
         IReadOnlyLargeArray<T> inner = EnsureInner();
+        
+        if (count == 0L)
+        {
+            return;
+        }
+
         StorageExtensions.CheckRange(offset, count, _Count);
         long start = _Start + offset;
-        inner.DoForEach(action, start, count, ref userData);
+        inner.DoForEach(ref action, start, count);
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public void DoForEach(Action<T> action)
-    {
-        IReadOnlyLargeArray<T> inner = EnsureInner();
-        inner.DoForEach(action, _Start, _Count);
-    }
-
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public void DoForEach<TUserData>(ActionWithUserData<T, TUserData> action, ref TUserData userData)
-    {
-        IReadOnlyLargeArray<T> inner = EnsureInner();
-        inner.DoForEach(action, _Start, _Count, ref userData);
-    }
+    #endregion
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public T Get(long index)
@@ -379,75 +425,81 @@ public readonly struct ReadOnlyLargeSpan<T> : IReadOnlyLargeArray<T>
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public long IndexOf(T item)
+    public long IndexOf(T item, long? offset = null, long? count = null)
     {
         IReadOnlyLargeArray<T> inner = EnsureInner();
-        long result = inner.IndexOf(item, _Start, _Count);
-        return result;
+        long actualOffset = offset ?? 0L;
+        long actualCount = count ?? (_Count - actualOffset);
+        StorageExtensions.CheckRange(actualOffset, actualCount, _Count);
+        long start = _Start + actualOffset;
+        long result = inner.IndexOf(item, start, actualCount);
+        return result >= 0L ? result - _Start : result;
+    }
+
+    /// <summary>
+    /// Finds the index of the first occurrence of an item using a generic equality comparer for optimal performance.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public long IndexOf<TComparer>(T item, ref TComparer comparer, long? offset = null, long? count = null) where TComparer : IEqualityComparer<T>
+    {
+        IReadOnlyLargeArray<T> inner = EnsureInner();
+        long actualOffset = offset ?? 0L;
+        long actualCount = count ?? (_Count - actualOffset);
+        StorageExtensions.CheckRange(actualOffset, actualCount, _Count);
+        long start = _Start + actualOffset;
+        long result;
+        if (inner is LargeArray<T> largeArray)
+        {
+            result = largeArray.IndexOf(item, ref comparer, start, actualCount);
+        }
+        else if (inner is LargeList<T> largeList)
+        {
+            result = largeList.IndexOf(item, ref comparer, start, actualCount);
+        }
+        else
+        {
+            throw new NotSupportedException($"Generic IndexOf is not supported for inner type {inner.GetType().Name}. Use the delegate-based overload instead.");
+        }
+        return result >= 0L ? result - _Start : result;
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public long IndexOf(T item, Func<T, T, bool> equalsFunction)
+    public long LastIndexOf(T item, long? offset = null, long? count = null)
     {
         IReadOnlyLargeArray<T> inner = EnsureInner();
-        long result = inner.IndexOf(item, _Start, _Count, equalsFunction);
-        return result;
+        long actualOffset = offset ?? 0L;
+        long actualCount = count ?? (_Count - actualOffset);
+        StorageExtensions.CheckRange(actualOffset, actualCount, _Count);
+        long start = _Start + actualOffset;
+        long result = inner.LastIndexOf(item, start, actualCount);
+        return result >= 0L ? result - _Start : result;
     }
 
+    /// <summary>
+    /// Finds the index of the last occurrence of an item using a generic equality comparer for optimal performance.
+    /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public long IndexOf(T item, long offset, long count)
+    public long LastIndexOf<TComparer>(T item, ref TComparer comparer, long? offset = null, long? count = null) where TComparer : IEqualityComparer<T>
     {
         IReadOnlyLargeArray<T> inner = EnsureInner();
-        StorageExtensions.CheckRange(offset, count, _Count);
-        long start = _Start + offset;
-        long result = inner.IndexOf(item, start, count);
-        return result;
-    }
-
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public long IndexOf(T item, long offset, long count, Func<T, T, bool> equalsFunction)
-    {
-        IReadOnlyLargeArray<T> inner = EnsureInner();
-        StorageExtensions.CheckRange(offset, count, _Count);
-        long start = _Start + offset;
-        long result = inner.IndexOf(item, start, count, equalsFunction);
-        return result;
-    }
-
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public long LastIndexOf(T item)
-    {
-        IReadOnlyLargeArray<T> inner = EnsureInner();
-        long result = inner.LastIndexOf(item, _Start, _Count);
-        return result;
-    }
-
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public long LastIndexOf(T item, Func<T, T, bool> equalsFunction)
-    {
-        IReadOnlyLargeArray<T> inner = EnsureInner();
-        long result = inner.LastIndexOf(item, _Start, _Count, equalsFunction);
-        return result;
-    }
-
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public long LastIndexOf(T item, long offset, long count)
-    {
-        IReadOnlyLargeArray<T> inner = EnsureInner();
-        StorageExtensions.CheckRange(offset, count, _Count);
-        long start = _Start + offset;
-        long result = inner.LastIndexOf(item, start, count);
-        return result;
-    }
-
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public long LastIndexOf(T item, long offset, long count, Func<T, T, bool> equalsFunction)
-    {
-        IReadOnlyLargeArray<T> inner = EnsureInner();
-        StorageExtensions.CheckRange(offset, count, _Count);
-        long start = _Start + offset;
-        long result = inner.LastIndexOf(item, start, count, equalsFunction);
-        return result;
+        long actualOffset = offset ?? 0L;
+        long actualCount = count ?? (_Count - actualOffset);
+        StorageExtensions.CheckRange(actualOffset, actualCount, _Count);
+        long start = _Start + actualOffset;
+        long result;
+        if (inner is LargeArray<T> largeArray)
+        {
+            result = largeArray.LastIndexOf(item, ref comparer, start, actualCount);
+        }
+        else if (inner is LargeList<T> largeList)
+        {
+            result = largeList.LastIndexOf(item, ref comparer, start, actualCount);
+        }
+        else
+        {
+            throw new NotSupportedException($"Generic LastIndexOf is not supported for inner type {inner.GetType().Name}. Use the delegate-based overload instead.");
+        }
+        return result >= 0L ? result - _Start : result;
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]

@@ -395,7 +395,8 @@ public class LargeObservableCollectionTest
         LargeObservableCollection<long> collection = CreateCollectionWithSequence(Math.Max(1L, capacity), 5L);
         using EventRecorder<long> recorder = new(collection);
 
-        bool removed = collection.Remove(5L, preserveOrder: true, out long removedValue, static (l, r) => l == r);
+        DelegateEqualityComparer<long> comparer = new (static (l, r) => l == r, x => x.GetHashCode());
+        bool removed = collection.Remove(5L, out long removedValue, comparer, preserveOrder: true);
 
         await Assert.That(removed).IsTrue();
         await Assert.That(removedValue).IsEqualTo(5L);
@@ -435,7 +436,8 @@ public class LargeObservableCollectionTest
         LargeObservableCollection<long> collection = CreateCollectionWithSequence(3L, 30L);
         using EventRecorder<long> recorder = new(collection);
 
-        bool removed = collection.Remove(31L, preserveOrder: false, out long removedItem);
+        DefaultEqualityComparer<long> comparer = new ();
+        bool removed = collection.Remove(31L, out long removedItem, comparer, preserveOrder: false);
 
         await Assert.That(removed).IsTrue();
         await Assert.That(removedItem).IsEqualTo(31L);
@@ -450,7 +452,8 @@ public class LargeObservableCollectionTest
         using EventRecorder<string> recorder = new(collection);
         collection.Add("FOO");
 
-        bool removed = collection.Remove("foo", static (l, r) => string.Equals(l, r, StringComparison.OrdinalIgnoreCase));
+        DelegateEqualityComparer<string> comparer = new (static (l, r) => string.Equals(l, r, StringComparison.OrdinalIgnoreCase), x => x?.GetHashCode() ?? 0);
+        bool removed = collection.Remove("foo", out _, comparer);
 
         await Assert.That(removed).IsTrue();
         await Assert.That(collection.Count).IsEqualTo(0L);
@@ -463,7 +466,8 @@ public class LargeObservableCollectionTest
         LargeObservableCollection<long> collection = CreateCollectionWithSequence(3L, 400L);
         using EventRecorder<long> recorder = new(collection);
 
-        bool removed = collection.Remove(401L, preserveOrder: false);
+        DefaultEqualityComparer<long> comparer = new ();
+        bool removed = collection.Remove(401L, out _, comparer, preserveOrder: false);
 
         await Assert.That(removed).IsTrue();
         await Assert.That(recorder.CollectionEvents.Last().Action).IsEqualTo(NotifyCollectionChangedAction.Reset);
@@ -476,7 +480,8 @@ public class LargeObservableCollectionTest
         using EventRecorder<string> recorder = new(collection);
         collection.Add("alpha");
 
-        bool removed = collection.Remove("ALPHA", out string removedItem, static (l, r) => string.Equals(l, r, StringComparison.OrdinalIgnoreCase));
+        DelegateEqualityComparer<string> comparer = new (static (l, r) => string.Equals(l, r, StringComparison.OrdinalIgnoreCase), x => x?.GetHashCode() ?? 0);
+        bool removed = collection.Remove("ALPHA", out string removedItem, comparer);
 
         await Assert.That(removed).IsTrue();
         await Assert.That(removedItem).IsEqualTo("alpha");
@@ -490,7 +495,8 @@ public class LargeObservableCollectionTest
         using EventRecorder<string> recorder = new(collection);
         collection.AddRange(new[] { "x", "y" });
 
-        bool removed = collection.Remove("Y", preserveOrder: false, static (l, r) => string.Equals(l, r, StringComparison.OrdinalIgnoreCase));
+        DelegateEqualityComparer<string> comparer = new (static (l, r) => string.Equals(l, r, StringComparison.OrdinalIgnoreCase), x => x?.GetHashCode() ?? 0);
+        bool removed = collection.Remove("Y", out _, comparer, preserveOrder: false);
 
         await Assert.That(removed).IsTrue();
         await Assert.That(recorder.CollectionEvents.Last().Action).IsEqualTo(NotifyCollectionChangedAction.Reset);
@@ -750,7 +756,7 @@ public class LargeObservableCollectionTest
     {
         // Use a sequence for BinarySearch tests (needs sorted unique values)
         LargeObservableCollection<long> collection = CreateCollectionWithSequence(capacity, 100L);
-        Func<long, long, int> comparer = static (l, r) => l.CompareTo(r);
+        DefaultComparer<long> comparer = new();
 
         long value = collection.Count > 0 ? collection[0] : 0L;
 
@@ -758,20 +764,26 @@ public class LargeObservableCollectionTest
         await Assert.That(collection.BinarySearch(value, comparer, 0L, collection.Count)).IsEqualTo(collection.Count > 0 ? 0L : -1L);
 
         await Assert.That(collection.Contains(value)).IsEqualTo(collection.Count > 0);
-        await Assert.That(collection.Contains(value, static (l, r) => l == r)).IsEqualTo(collection.Count > 0);
+        DefaultEqualityComparer<long> eq1 = new();
+        await Assert.That(collection.Contains(value, ref eq1)).IsEqualTo(collection.Count > 0);
         await Assert.That(collection.Contains(value, 0L, collection.Count)).IsEqualTo(collection.Count > 0);
-        await Assert.That(collection.Contains(value, 0L, collection.Count, static (l, r) => l == r)).IsEqualTo(collection.Count > 0);
+        DefaultEqualityComparer<long> eq2 = new();
+        await Assert.That(collection.Contains(value, ref eq2, 0L, collection.Count)).IsEqualTo(collection.Count > 0);
 
         await Assert.That(collection.IndexOf(value)).IsEqualTo(collection.Count > 0 ? 0L : -1L);
         await Assert.That(collection.IndexOf(value, 0L, collection.Count)).IsEqualTo(collection.Count > 0 ? 0L : -1L);
-        await Assert.That(collection.IndexOf(value, static (l, r) => l == r)).IsEqualTo(collection.Count > 0 ? 0L : -1L);
-        await Assert.That(collection.IndexOf(value, 0L, collection.Count, static (l, r) => l == r)).IsEqualTo(collection.Count > 0 ? 0L : -1L);
+        DefaultEqualityComparer<long> eq3 = new();
+        await Assert.That(collection.IndexOf(value, ref eq3)).IsEqualTo(collection.Count > 0 ? 0L : -1L);
+        DefaultEqualityComparer<long> eq4 = new();
+        await Assert.That(collection.IndexOf(value, ref eq4, 0L, collection.Count)).IsEqualTo(collection.Count > 0 ? 0L : -1L);
 
         // LastIndexOf on a sequence should return 0 (value is only at index 0)
         await Assert.That(collection.LastIndexOf(value)).IsEqualTo(collection.Count > 0 ? 0L : -1L);
         await Assert.That(collection.LastIndexOf(value, 0L, collection.Count)).IsEqualTo(collection.Count > 0 ? 0L : -1L);
-        await Assert.That(collection.LastIndexOf(value, static (l, r) => l == r)).IsEqualTo(collection.Count > 0 ? 0L : -1L);
-        await Assert.That(collection.LastIndexOf(value, 0L, collection.Count, static (l, r) => l == r)).IsEqualTo(collection.Count > 0 ? 0L : -1L);
+        DefaultEqualityComparer<long> eq5 = new();
+        await Assert.That(collection.LastIndexOf(value, ref eq5)).IsEqualTo(collection.Count > 0 ? 0L : -1L);
+        DefaultEqualityComparer<long> eq6 = new();
+        await Assert.That(collection.LastIndexOf(value, ref eq6, 0L, collection.Count)).IsEqualTo(collection.Count > 0 ? 0L : -1L);
         
         // Test LastIndexOf with duplicate values
         if (collection.Count > 0)
@@ -780,8 +792,10 @@ public class LargeObservableCollectionTest
             long duplicateValue = 100L;
             await Assert.That(collectionWithDuplicates.LastIndexOf(duplicateValue)).IsEqualTo(collectionWithDuplicates.Count - 1);
             await Assert.That(collectionWithDuplicates.LastIndexOf(duplicateValue, 0L, collectionWithDuplicates.Count)).IsEqualTo(collectionWithDuplicates.Count - 1);
-            await Assert.That(collectionWithDuplicates.LastIndexOf(duplicateValue, static (l, r) => l == r)).IsEqualTo(collectionWithDuplicates.Count - 1);
-            await Assert.That(collectionWithDuplicates.LastIndexOf(duplicateValue, 0L, collectionWithDuplicates.Count, static (l, r) => l == r)).IsEqualTo(collectionWithDuplicates.Count - 1);
+            DefaultEqualityComparer<long> eq7 = new();
+            await Assert.That(collectionWithDuplicates.LastIndexOf(duplicateValue, ref eq7)).IsEqualTo(collectionWithDuplicates.Count - 1);
+            DefaultEqualityComparer<long> eq8 = new();
+            await Assert.That(collectionWithDuplicates.LastIndexOf(duplicateValue, ref eq8, 0L, collectionWithDuplicates.Count)).IsEqualTo(collectionWithDuplicates.Count - 1);
         }
     }
 
@@ -789,15 +803,18 @@ public class LargeObservableCollectionTest
     public async Task Lookup_InvalidRanges_Throw()
     {
         LargeObservableCollection<long> collection = CreateCollectionWithSequence(2L, 0L);
-        Func<long, long, int> comparer = static (l, r) => l.CompareTo(r);
+        DefaultComparer<long> comparer = new();
 
         await Assert.That(() => collection.BinarySearch(0L, comparer, -1L, 1L)).Throws<Exception>();
         await Assert.That(() => collection.Contains(0L, -1L, 1L)).Throws<Exception>();
-        await Assert.That(() => collection.Contains(0L, -1L, 1L, static (l, r) => l == r)).Throws<Exception>();
+        DefaultEqualityComparer<long> eq1 = new();
+        await Assert.That(() => collection.Contains(0L, ref eq1, -1L, 1L)).Throws<Exception>();
         await Assert.That(() => collection.IndexOf(0L, -1L, 1L)).Throws<Exception>();
-        await Assert.That(() => collection.IndexOf(0L, -1L, 1L, static (l, r) => l == r)).Throws<Exception>();
+        DefaultEqualityComparer<long> eq2 = new();
+        await Assert.That(() => collection.IndexOf(0L, ref eq2, -1L, 1L)).Throws<Exception>();
         await Assert.That(() => collection.LastIndexOf(0L, -1L, 1L)).Throws<Exception>();
-        await Assert.That(() => collection.LastIndexOf(0L, -1L, 1L, static (l, r) => l == r)).Throws<Exception>();
+        DefaultEqualityComparer<long> eq3 = new();
+        await Assert.That(() => collection.LastIndexOf(0L, ref eq3, -1L, 1L)).Throws<Exception>();
     }
 
     [Test]
@@ -858,13 +875,13 @@ public class LargeObservableCollectionTest
         collection.DoForEach(item => rangeSum += item, offset, rangeCount);
         await Assert.That(rangeSum).IsEqualTo(collection.Skip((int)offset).Sum());
 
-        long accumulator = 0L;
-        collection.DoForEach(static (long value, ref long acc) => acc += value, ref accumulator);
-        await Assert.That(accumulator).IsEqualTo(collection.ToList().Sum());
+        SumAction sumAction = new ();
+        collection.DoForEach(ref sumAction);
+        await Assert.That(sumAction.Sum).IsEqualTo(collection.ToList().Sum());
 
-        long rangeAccumulator = 0L;
-        collection.DoForEach(static (long value, ref long acc) => acc += value, offset, rangeCount, ref rangeAccumulator);
-        await Assert.That(rangeAccumulator).IsEqualTo(collection.Skip((int)offset).Sum());
+        SumAction rangeSumAction = new ();
+        collection.DoForEach(ref rangeSumAction, offset, rangeCount);
+        await Assert.That(rangeSumAction.Sum).IsEqualTo(collection.Skip((int)offset).Sum());
     }
 
     [Test]
@@ -872,8 +889,6 @@ public class LargeObservableCollectionTest
     {
         LargeObservableCollection<long> collection = CreateCollectionWithSequence(3L, 0L);
         await Assert.That(() => collection.DoForEach(_ => { }, -1L, 1L)).Throws<Exception>();
-        long data = 0L;
-        await Assert.That(() => collection.DoForEach(static (long _, ref long __) => { }, -1L, 1L, ref data)).Throws<Exception>();
     }
 
     #endregion
@@ -887,7 +902,7 @@ public class LargeObservableCollectionTest
         LargeObservableCollection<long> collection = CreateCollectionWithSequence(capacity, 0L);
         using EventRecorder<long> recorder = new(collection);
 
-        collection.Sort(static (l, r) => r.CompareTo(l));
+        collection.Sort(new DescendingComparer<long>());
 
         if (collection.Count > 1)
         {
@@ -903,7 +918,7 @@ public class LargeObservableCollectionTest
         recorder.Reset();
         long offset = Math.Min(1L, Math.Max(0L, collection.Count - 2L));
         long count = Math.Min(2L, collection.Count - offset);
-        collection.Sort(static (l, r) => l.CompareTo(r), offset, count);
+        collection.Sort(new DefaultComparer<long>(), offset, count);
         if (count > 1)
         {
             await Assert.That(recorder.CollectionEvents.Last().Action).IsEqualTo(NotifyCollectionChangedAction.Reset);
@@ -1072,6 +1087,16 @@ public class LargeObservableCollectionTest
         {
             yield return i;
         }
+    }
+
+    #endregion
+
+    #region Helper Structs
+
+    private struct SumAction : ILargeAction<long>
+    {
+        public long Sum;
+        public void Invoke(long item) => Sum += item;
     }
 
     #endregion

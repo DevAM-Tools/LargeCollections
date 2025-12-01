@@ -62,11 +62,24 @@ public class LargeObservableCollection<T> : ILargeObservableCollection<T>
         _SuppressEventExceptions = suppressEventExceptions;
     }
 
+    #region Standard Events
+
     public event NotifyCollectionChangedEventHandler CollectionChanged;
     public event PropertyChangedEventHandler PropertyChanged;
 
+    #endregion
+
+    #region High-Performance Events
+
+    /// <inheritdoc/>
+    public event LargeCollectionChangedEventHandler<T> Changed;
+
+    #endregion
+
     private static readonly NotifyCollectionChangedEventArgs _ResetEventArgs = new(NotifyCollectionChangedAction.Reset);
     private static readonly PropertyChangedEventArgs _CountPropertyChangedEventArgs = new(nameof(Count));
+
+    #region Event Firing Methods
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private void PublishChangedCount()
@@ -130,6 +143,34 @@ public class LargeObservableCollection<T> : ILargeObservableCollection<T>
         }
     }
 
+    /// <summary>
+    /// Raises the high-performance Changed event with the specified event args.
+    /// Only fires if someone is listening.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private void RaiseChanged(in LargeCollectionChangedEventArgs<T> args)
+    {
+        if (Interlocked.CompareExchange(ref _SuspendNotificationsCounter, 0, 0) > 0)
+        {
+            return;
+        }
+
+        // Fire Changed event only if someone is listening
+        if (Changed != null)
+        {
+            if (_SuppressEventExceptions)
+            {
+                try { Changed.Invoke(this, in args); } catch { }
+            }
+            else
+            {
+                Changed.Invoke(this, in args);
+            }
+        }
+    }
+
+    #endregion
+
     public T this[long index]
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -141,16 +182,23 @@ public class LargeObservableCollection<T> : ILargeObservableCollection<T>
             T oldItem = _List[index];
             _List[index] = value;
 
-            // Single item change - use specific event if index fits in int
-            if (index <= int.MaxValue)
+            // Fire standard event only if someone is listening
+            if (CollectionChanged != null)
             {
-                NotifyCollectionChangedEventArgs args = new(NotifyCollectionChangedAction.Replace, value, oldItem, (int)index);
-                OnCollectionChanged(args);
+                if (index <= int.MaxValue)
+                {
+                    OnCollectionChanged(new(NotifyCollectionChangedAction.Replace, value, oldItem, (int)index));
+                }
+                else
+                {
+                    OnCollectionChanged(_ResetEventArgs);
+                }
             }
-            else
+
+            // Fire high-performance event only if someone is listening
+            if (Changed != null)
             {
-                // Large index - use Reset
-                OnCollectionChanged(_ResetEventArgs);
+                RaiseChanged(LargeCollectionChangedEventArgs<T>.ItemReplaced(value, oldItem, index));
             }
         }
     }
@@ -170,17 +218,28 @@ public class LargeObservableCollection<T> : ILargeObservableCollection<T>
         long index = Count;
         _List.Add(item);
 
-        // Single item add - use specific event if index fits in int
-        if (index <= int.MaxValue)
+        // Fire standard event only if someone is listening
+        if (CollectionChanged != null)
         {
-            NotifyCollectionChangedEventArgs args = new(NotifyCollectionChangedAction.Add, item, (int)index);
-            OnCollectionChanged(args);
-            PublishChangedCount();
+            if (index <= int.MaxValue)
+            {
+                OnCollectionChanged(new(NotifyCollectionChangedAction.Add, item, (int)index));
+            }
+            else
+            {
+                OnCollectionChanged(_ResetEventArgs);
+            }
         }
-        else
+
+        // Fire high-performance event only if someone is listening
+        if (Changed != null)
         {
-            // Large index - use Reset
-            OnCollectionChanged(_ResetEventArgs);
+            RaiseChanged(LargeCollectionChangedEventArgs<T>.ItemAdded(item, index));
+        }
+
+        // Fire PropertyChanged only if someone is listening
+        if (PropertyChanged != null)
+        {
             PublishChangedCount();
         }
     }
@@ -196,19 +255,45 @@ public class LargeObservableCollection<T> : ILargeObservableCollection<T>
         {
             return;
         }
-        else if (addedCount == 1 && initialCount <= int.MaxValue)
+        else if (addedCount == 1)
         {
-            // Single item added - use specific event
+            // Single item added
             T addedItem = _List[initialCount];
-            NotifyCollectionChangedEventArgs args = new(NotifyCollectionChangedAction.Add, addedItem, (int)initialCount);
-            OnCollectionChanged(args);
-            PublishChangedCount();
+            if (CollectionChanged != null)
+            {
+                if (initialCount <= int.MaxValue)
+                {
+                    OnCollectionChanged(new(NotifyCollectionChangedAction.Add, addedItem, (int)initialCount));
+                }
+                else
+                {
+                    OnCollectionChanged(_ResetEventArgs);
+                }
+            }
+            if (Changed != null)
+            {
+                RaiseChanged(LargeCollectionChangedEventArgs<T>.ItemAdded(addedItem, initialCount));
+            }
+            if (PropertyChanged != null)
+            {
+                PublishChangedCount();
+            }
         }
         else
         {
-            // Multiple items added or large index - use Reset
-            OnCollectionChanged(_ResetEventArgs);
-            PublishChangedCount();
+            // Multiple items added
+            if (CollectionChanged != null)
+            {
+                OnCollectionChanged(_ResetEventArgs);
+            }
+            if (Changed != null)
+            {
+                RaiseChanged(LargeCollectionChangedEventArgs<T>.RangeAdded(initialCount, addedCount));
+            }
+            if (PropertyChanged != null)
+            {
+                PublishChangedCount();
+            }
         }
     }
 
@@ -262,19 +347,45 @@ public class LargeObservableCollection<T> : ILargeObservableCollection<T>
         {
             return;
         }
-        else if (addedCount == 1 && initialCount <= int.MaxValue)
+        else if (addedCount == 1)
         {
-            // Single item added - use specific event
+            // Single item added
             T addedItem = _List[initialCount];
-            NotifyCollectionChangedEventArgs args = new(NotifyCollectionChangedAction.Add, addedItem, (int)initialCount);
-            OnCollectionChanged(args);
-            PublishChangedCount();
+            if (CollectionChanged != null)
+            {
+                if (initialCount <= int.MaxValue)
+                {
+                    OnCollectionChanged(new(NotifyCollectionChangedAction.Add, addedItem, (int)initialCount));
+                }
+                else
+                {
+                    OnCollectionChanged(_ResetEventArgs);
+                }
+            }
+            if (Changed != null)
+            {
+                RaiseChanged(LargeCollectionChangedEventArgs<T>.ItemAdded(addedItem, initialCount));
+            }
+            if (PropertyChanged != null)
+            {
+                PublishChangedCount();
+            }
         }
         else
         {
-            // Multiple items added or large index - use Reset
-            OnCollectionChanged(_ResetEventArgs);
-            PublishChangedCount();
+            // Multiple items added
+            if (CollectionChanged != null)
+            {
+                OnCollectionChanged(_ResetEventArgs);
+            }
+            if (Changed != null)
+            {
+                RaiseChanged(LargeCollectionChangedEventArgs<T>.RangeAdded(initialCount, addedCount));
+            }
+            if (PropertyChanged != null)
+            {
+                PublishChangedCount();
+            }
         }
     }
 
@@ -294,19 +405,45 @@ public class LargeObservableCollection<T> : ILargeObservableCollection<T>
         {
             return;
         }
-        else if (addedCount == 1 && initialCount <= int.MaxValue)
+        else if (addedCount == 1)
         {
-            // Single item added - use specific event
+            // Single item added
             T addedItem = _List[initialCount];
-            NotifyCollectionChangedEventArgs args = new(NotifyCollectionChangedAction.Add, addedItem, (int)initialCount);
-            OnCollectionChanged(args);
-            PublishChangedCount();
+            if (CollectionChanged != null)
+            {
+                if (initialCount <= int.MaxValue)
+                {
+                    OnCollectionChanged(new(NotifyCollectionChangedAction.Add, addedItem, (int)initialCount));
+                }
+                else
+                {
+                    OnCollectionChanged(_ResetEventArgs);
+                }
+            }
+            if (Changed != null)
+            {
+                RaiseChanged(LargeCollectionChangedEventArgs<T>.ItemAdded(addedItem, initialCount));
+            }
+            if (PropertyChanged != null)
+            {
+                PublishChangedCount();
+            }
         }
         else
         {
-            // Multiple items added or large index - use Reset
-            OnCollectionChanged(_ResetEventArgs);
-            PublishChangedCount();
+            // Multiple items added
+            if (CollectionChanged != null)
+            {
+                OnCollectionChanged(_ResetEventArgs);
+            }
+            if (Changed != null)
+            {
+                RaiseChanged(LargeCollectionChangedEventArgs<T>.RangeAdded(initialCount, addedCount));
+            }
+            if (PropertyChanged != null)
+            {
+                PublishChangedCount();
+            }
         }
     }
 
@@ -361,19 +498,45 @@ public class LargeObservableCollection<T> : ILargeObservableCollection<T>
         {
             return;
         }
-        else if (addedCount == 1 && initialCount <= int.MaxValue)
+        else if (addedCount == 1)
         {
-            // Single item added - use specific event
+            // Single item added
             T addedItem = _List[initialCount];
-            NotifyCollectionChangedEventArgs args = new(NotifyCollectionChangedAction.Add, addedItem, (int)initialCount);
-            OnCollectionChanged(args);
-            PublishChangedCount();
+            if (CollectionChanged != null)
+            {
+                if (initialCount <= int.MaxValue)
+                {
+                    OnCollectionChanged(new(NotifyCollectionChangedAction.Add, addedItem, (int)initialCount));
+                }
+                else
+                {
+                    OnCollectionChanged(_ResetEventArgs);
+                }
+            }
+            if (Changed != null)
+            {
+                RaiseChanged(LargeCollectionChangedEventArgs<T>.ItemAdded(addedItem, initialCount));
+            }
+            if (PropertyChanged != null)
+            {
+                PublishChangedCount();
+            }
         }
         else
         {
-            // Multiple items added or large index - use Reset
-            OnCollectionChanged(_ResetEventArgs);
-            PublishChangedCount();
+            // Multiple items added
+            if (CollectionChanged != null)
+            {
+                OnCollectionChanged(_ResetEventArgs);
+            }
+            if (Changed != null)
+            {
+                RaiseChanged(LargeCollectionChangedEventArgs<T>.RangeAdded(initialCount, addedCount));
+            }
+            if (PropertyChanged != null)
+            {
+                PublishChangedCount();
+            }
         }
     }
 
@@ -394,19 +557,45 @@ public class LargeObservableCollection<T> : ILargeObservableCollection<T>
         {
             return;
         }
-        else if (addedCount == 1 && initialCount <= int.MaxValue)
+        else if (addedCount == 1)
         {
-            // Single item added - use specific event
+            // Single item added
             T addedItem = _List[initialCount];
-            NotifyCollectionChangedEventArgs args = new(NotifyCollectionChangedAction.Add, addedItem, (int)initialCount);
-            OnCollectionChanged(args);
-            PublishChangedCount();
+            if (CollectionChanged != null)
+            {
+                if (initialCount <= int.MaxValue)
+                {
+                    OnCollectionChanged(new(NotifyCollectionChangedAction.Add, addedItem, (int)initialCount));
+                }
+                else
+                {
+                    OnCollectionChanged(_ResetEventArgs);
+                }
+            }
+            if (Changed != null)
+            {
+                RaiseChanged(LargeCollectionChangedEventArgs<T>.ItemAdded(addedItem, initialCount));
+            }
+            if (PropertyChanged != null)
+            {
+                PublishChangedCount();
+            }
         }
         else
         {
-            // Multiple items added or large index - use Reset
-            OnCollectionChanged(_ResetEventArgs);
-            PublishChangedCount();
+            // Multiple items added
+            if (CollectionChanged != null)
+            {
+                OnCollectionChanged(_ResetEventArgs);
+            }
+            if (Changed != null)
+            {
+                RaiseChanged(LargeCollectionChangedEventArgs<T>.RangeAdded(initialCount, addedCount));
+            }
+            if (PropertyChanged != null)
+            {
+                PublishChangedCount();
+            }
         }
     }
 #endif
@@ -414,57 +603,63 @@ public class LargeObservableCollection<T> : ILargeObservableCollection<T>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void Clear()
     {
-        if (Count == 0)
+        long previousCount = Count;
+        if (previousCount == 0)
         {
             return;
         }
 
         _List.Clear();
 
-        OnCollectionChanged(_ResetEventArgs);
-        PublishChangedCount();
+        if (CollectionChanged != null)
+        {
+            OnCollectionChanged(_ResetEventArgs);
+        }
+        if (Changed != null)
+        {
+            RaiseChanged(LargeCollectionChangedEventArgs<T>.Cleared(previousCount));
+        }
+        if (PropertyChanged != null)
+        {
+            PublishChangedCount();
+        }
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public bool Remove(T item)
-        => Remove(item, true, out _);
-
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public bool Remove(T item, bool preserveOrder)
-        => Remove(item, preserveOrder, out _);
+        => Remove(item, out _, true);
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public bool Remove(T item, out T removedItem)
-        => Remove(item, true, out removedItem);
+        => Remove(item, out removedItem, true);
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public bool Remove(T item, bool preserveOrder, out T removedItem)
-        => Remove(item, preserveOrder, out removedItem, null);
-
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public bool Remove(T item, Func<T, T, bool> equalsFunction)
-            => Remove(item, true, out _, equalsFunction);
-
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public bool Remove(T item, bool preserveOrder, Func<T, T, bool> equalsFunction)
-            => Remove(item, preserveOrder, out _, equalsFunction);
-
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public bool Remove(T item, out T removedItem, Func<T, T, bool> equalsFunction)
-            => Remove(item, true, out removedItem, equalsFunction);
-
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public bool Remove(T item, bool preserveOrder, out T removedItem, Func<T, T, bool> equalsFunction)
+    public bool Remove(T item, out T removedItem, bool preserveOrder = true)
     {
-        equalsFunction ??= LargeSet<T>.DefaultEqualsFunction;
+        ObjectEqualityComparer<T> comparer = new ();
+        return Remove(item, out removedItem, comparer, preserveOrder);
+    }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public bool Remove<TComparer>(T item, out T removedItem, TComparer comparer, bool preserveOrder = true)
+        where TComparer : IEqualityComparer<T>
+    {
         removedItem = default;
 
-        if (_List.Remove(item, preserveOrder, out removedItem, equalsFunction))
+        if (_List.Remove(item, out removedItem, comparer, preserveOrder))
         {
-            // Calculating the index of the removed item would require a full scan which is to expensive - use Reset
-            OnCollectionChanged(_ResetEventArgs);
-            PublishChangedCount();
+            if (CollectionChanged != null)
+            {
+                OnCollectionChanged(_ResetEventArgs);
+            }
+            if (Changed != null)
+            {
+                RaiseChanged(LargeCollectionChangedEventArgs<T>.Reset());
+            }
+            if (PropertyChanged != null)
+            {
+                PublishChangedCount();
+            }
 
             return true;
         }
@@ -473,25 +668,27 @@ public class LargeObservableCollection<T> : ILargeObservableCollection<T>
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public T RemoveAt(long index)
-        => RemoveAt(index, true);
-
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public T RemoveAt(long index, bool preserveOrder)
+    public T RemoveAt(long index, bool preserveOrder = true)
     {
         T removedItem = _List.RemoveAt(index, preserveOrder);
 
-        // Single item remove - use specific event if index fits in int
-        if (index <= int.MaxValue)
+        if (CollectionChanged != null)
         {
-            NotifyCollectionChangedEventArgs args = new(NotifyCollectionChangedAction.Remove, removedItem, (int)index);
-            OnCollectionChanged(args);
-            PublishChangedCount();
+            if (index <= int.MaxValue)
+            {
+                OnCollectionChanged(new(NotifyCollectionChangedAction.Remove, removedItem, (int)index));
+            }
+            else
+            {
+                OnCollectionChanged(_ResetEventArgs);
+            }
         }
-        else
+        if (Changed != null)
         {
-            // Large index - use Reset
-            OnCollectionChanged(_ResetEventArgs);
+            RaiseChanged(LargeCollectionChangedEventArgs<T>.ItemRemoved(removedItem, index));
+        }
+        if (PropertyChanged != null)
+        {
             PublishChangedCount();
         }
 
@@ -507,42 +704,49 @@ public class LargeObservableCollection<T> : ILargeObservableCollection<T>
         T oldItem = _List[index];
         _List.Set(index, item);
 
-        // Single item change - use specific event if index fits in int
-        if (index <= int.MaxValue)
+        if (CollectionChanged != null)
         {
-            NotifyCollectionChangedEventArgs args = new NotifyCollectionChangedEventArgs(NotifyCollectionChangedAction.Replace, item, oldItem, (int)index);
-            OnCollectionChanged(args);
+            if (index <= int.MaxValue)
+            {
+                OnCollectionChanged(new(NotifyCollectionChangedAction.Replace, item, oldItem, (int)index));
+            }
+            else
+            {
+                OnCollectionChanged(_ResetEventArgs);
+            }
         }
-        else
+        if (Changed != null)
         {
-            // Large index - use Reset
-            OnCollectionChanged(_ResetEventArgs);
+            RaiseChanged(LargeCollectionChangedEventArgs<T>.ItemReplaced(item, oldItem, index));
         }
     }
 
+    /// <summary>
+    /// Performs a binary search using a generic comparer for optimal performance through JIT devirtualization.
+    /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public long BinarySearch(T item, Func<T, T, int> comparer)
-        => _List.BinarySearch(item, comparer);
-
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public long BinarySearch(T item, Func<T, T, int> comparer, long offset, long count)
+    public long BinarySearch<TComparer>(T item, TComparer comparer, long? offset = null, long? count = null) where TComparer : IComparer<T>
         => _List.BinarySearch(item, comparer, offset, count);
 
+    /// <inheritdoc/>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public bool Contains(T item, long offset, long count)
-        => _List.Contains(item, offset, count);
+    public long BinarySearch(T item, long? offset = null, long? count = null)
+        => _List.BinarySearch(item, offset, count);
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public bool Contains(T item)
         => _List.Contains(item);
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public bool Contains(T item, Func<T, T, bool> equalsFunction)
-        => _List.Contains(item, equalsFunction);
+    public bool Contains(T item, long offset, long count)
+        => _List.Contains(item, offset, count);
 
+    /// <summary>
+    /// Determines whether the collection contains a specific item using a generic equality comparer for optimal performance.
+    /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public bool Contains(T item, long offset, long count, Func<T, T, bool> equalsFunction)
-        => _List.Contains(item, offset, count, equalsFunction);
+    public bool Contains<TComparer>(T item, ref TComparer comparer, long? offset = null, long? count = null) where TComparer : IEqualityComparer<T>
+        => _List.Contains(item, ref comparer, offset, count);
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void CopyFrom(IReadOnlyLargeArray<T> source, long sourceOffset, long targetOffset, long count)
@@ -560,23 +764,25 @@ public class LargeObservableCollection<T> : ILargeObservableCollection<T>
             T newItem = source[sourceOffset];
             _List[targetOffset] = newItem;
 
-            // Single item change - use specific event if index fits in int
-            if (targetOffset <= int.MaxValue)
+            if (CollectionChanged != null)
             {
-                NotifyCollectionChangedEventArgs args = new(NotifyCollectionChangedAction.Replace, newItem, oldItem, (int)targetOffset);
-                OnCollectionChanged(args);
-            }
-            else
-            {
-                // Large index - use Reset
-                OnCollectionChanged(_ResetEventArgs);
+                if (targetOffset <= int.MaxValue)
+                {
+                    OnCollectionChanged(new(NotifyCollectionChangedAction.Replace, newItem, oldItem, (int)targetOffset));
+                }
+                else
+                {
+                    OnCollectionChanged(_ResetEventArgs);
+                }
             }
         }
         else
         {
             _List.CopyFrom(source, sourceOffset, targetOffset, count);
-            // Multiple items changed - use Reset
-            OnCollectionChanged(_ResetEventArgs);
+            if (CollectionChanged != null)
+            {
+                OnCollectionChanged(_ResetEventArgs);
+            }
         }
     }
 
@@ -596,23 +802,25 @@ public class LargeObservableCollection<T> : ILargeObservableCollection<T>
             T newItem = source[0L];
             _List[targetOffset] = newItem;
 
-            // Single item change - use specific event if index fits in int
-            if (targetOffset <= int.MaxValue)
+            if (CollectionChanged != null)
             {
-                NotifyCollectionChangedEventArgs args = new(NotifyCollectionChangedAction.Replace, newItem, oldItem, (int)targetOffset);
-                OnCollectionChanged(args);
-            }
-            else
-            {
-                // Large index - use Reset
-                OnCollectionChanged(_ResetEventArgs);
+                if (targetOffset <= int.MaxValue)
+                {
+                    OnCollectionChanged(new(NotifyCollectionChangedAction.Replace, newItem, oldItem, (int)targetOffset));
+                }
+                else
+                {
+                    OnCollectionChanged(_ResetEventArgs);
+                }
             }
         }
         else
         {
             _List.CopyFrom(source, targetOffset, count);
-            // Multiple items changed - use Reset
-            OnCollectionChanged(_ResetEventArgs);
+            if (CollectionChanged != null)
+            {
+                OnCollectionChanged(_ResetEventArgs);
+            }
         }
     }
 
@@ -632,23 +840,25 @@ public class LargeObservableCollection<T> : ILargeObservableCollection<T>
             T newItem = source[sourceOffset];
             _List[targetOffset] = newItem;
 
-            // Single item change - use specific event if index fits in int
-            if (targetOffset <= int.MaxValue)
+            if (CollectionChanged != null)
             {
-                NotifyCollectionChangedEventArgs args = new(NotifyCollectionChangedAction.Replace, newItem, oldItem, (int)targetOffset);
-                OnCollectionChanged(args);
-            }
-            else
-            {
-                // Large index - use Reset
-                OnCollectionChanged(_ResetEventArgs);
+                if (targetOffset <= int.MaxValue)
+                {
+                    OnCollectionChanged(new(NotifyCollectionChangedAction.Replace, newItem, oldItem, (int)targetOffset));
+                }
+                else
+                {
+                    OnCollectionChanged(_ResetEventArgs);
+                }
             }
         }
         else
         {
             _List.CopyFromArray(source, sourceOffset, targetOffset, count);
-            // Multiple items changed - use Reset
-            OnCollectionChanged(_ResetEventArgs);
+            if (CollectionChanged != null)
+            {
+                OnCollectionChanged(_ResetEventArgs);
+            }
         }
     }
 
@@ -669,23 +879,25 @@ public class LargeObservableCollection<T> : ILargeObservableCollection<T>
             T newItem = source[0];
             _List[targetOffset] = newItem;
 
-            // Single item change - use specific event if index fits in int
-            if (targetOffset <= int.MaxValue)
+            if (CollectionChanged != null)
             {
-                NotifyCollectionChangedEventArgs args = new(NotifyCollectionChangedAction.Replace, newItem, oldItem, (int)targetOffset);
-                OnCollectionChanged(args);
-            }
-            else
-            {
-                // Large index - use Reset
-                OnCollectionChanged(_ResetEventArgs);
+                if (targetOffset <= int.MaxValue)
+                {
+                    OnCollectionChanged(new(NotifyCollectionChangedAction.Replace, newItem, oldItem, (int)targetOffset));
+                }
+                else
+                {
+                    OnCollectionChanged(_ResetEventArgs);
+                }
             }
         }
         else
         {
             _List.CopyFromSpan(source, targetOffset, count);
-            // Multiple items changed - use Reset
-            OnCollectionChanged(_ResetEventArgs);
+            if (CollectionChanged != null)
+            {
+                OnCollectionChanged(_ResetEventArgs);
+            }
         }
     }
 #endif
@@ -708,21 +920,58 @@ public class LargeObservableCollection<T> : ILargeObservableCollection<T>
         => _List.CopyToSpan(target, sourceOffset, count);
 #endif
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public void DoForEach(Action<T> action, long offset, long count)
-        => _List.DoForEach(action, offset, count);
+    #region DoForEach Methods
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public void DoForEach<TUserData>(ActionWithUserData<T, TUserData> action, long offset, long count, ref TUserData userData)
-        => _List.DoForEach(action, offset, count, ref userData);
-
+    /// <summary>
+    /// Performs the <paramref name="action"/> with items of the collection.
+    /// </summary>
+    /// <param name="action">The function that will be called for each item.</param>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void DoForEach(Action<T> action)
         => _List.DoForEach(action);
 
+    /// <summary>
+    /// Performs the <paramref name="action"/> with items of the collection within the specified range.
+    /// </summary>
+    /// <param name="action">The function that will be called for each item.</param>
+    /// <param name="offset">Starting offset.</param>
+    /// <param name="count">Number of elements to process.</param>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public void DoForEach<TUserData>(ActionWithUserData<T, TUserData> action, ref TUserData userData)
-        => _List.DoForEach(action, ref userData);
+    public void DoForEach(Action<T> action, long offset, long count)
+        => _List.DoForEach(action, offset, count);
+
+    /// <summary>
+    /// Performs the action on items using an action for optimal performance.
+    /// </summary>
+    /// <typeparam name="TAction">A type implementing <see cref="ILargeAction{T}"/>.</typeparam>
+    /// <param name="action">The action instance passed by reference.</param>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public void DoForEach<TAction>(ref TAction action) where TAction : ILargeAction<T>
+        => _List.DoForEach(ref action);
+
+    /// <summary>
+    /// Performs the action on items using an action for optimal performance.
+    /// </summary>
+    /// <typeparam name="TAction">A type implementing <see cref="ILargeAction{T}"/>.</typeparam>
+    /// <param name="action">The action instance passed by reference.</param>
+    /// <param name="offset">Starting offset.</param>
+    /// <param name="count">Number of elements to process.</param>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public void DoForEach<TAction>(ref TAction action, long offset, long count) where TAction : ILargeAction<T>
+        => _List.DoForEach(ref action, offset, count);
+
+    /// <summary>
+    /// Performs the action on each item by reference using an action.
+    /// </summary>
+    /// <typeparam name="TAction">A type implementing <see cref="ILargeRefAction{T}"/>.</typeparam>
+    /// <param name="action">The action instance passed by reference.</param>
+    /// <param name="offset">Optional starting offset. If null, starts from 0.</param>
+    /// <param name="count">Optional number of elements to process. If null, processes all remaining elements.</param>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public void DoForEachRef<TAction>(ref TAction action, long? offset = null, long? count = null) where TAction : ILargeRefAction<T>
+        => _List.DoForEachRef(ref action, offset, count);
+
+    #endregion
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public T Get(long index) => _List.Get(index);
@@ -739,32 +988,28 @@ public class LargeObservableCollection<T> : ILargeObservableCollection<T>
     public IEnumerator<T> GetEnumerator()
         => _List.GetEnumerator();
 
+    /// <summary>
+    /// Reorders the items of the collection in ascending order using a generic comparer for optimal performance.
+    /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public void Sort(Func<T, T, int> comparer)
-    {
-        _List.Sort(comparer);
-
-        if (Count <= 1L)
-        {
-            return;
-        }
-
-        // Sort changes order - use Reset
-        OnCollectionChanged(_ResetEventArgs);
-    }
-
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public void Sort(Func<T, T, int> comparer, long offset, long count)
+    public void Sort<TComparer>(TComparer comparer, long? offset = null, long? count = null) where TComparer : IComparer<T>
     {
         _List.Sort(comparer, offset, count);
 
-        if (count <= 1L)
+        long actualCount = count ?? Count;
+        if (actualCount <= 1L)
         {
             return;
         }
 
-        // If the sorted range is within the collection, fire reset event
-        OnCollectionChanged(_ResetEventArgs);
+        if (CollectionChanged != null)
+        {
+            OnCollectionChanged(_ResetEventArgs);
+        }
+        if (Changed != null)
+        {
+            RaiseChanged(LargeCollectionChangedEventArgs<T>.Reset());
+        }
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -772,8 +1017,14 @@ public class LargeObservableCollection<T> : ILargeObservableCollection<T>
     {
         _List.Swap(leftIndex, rightIndex);
 
-        // Swap changes positions - use Reset
-        OnCollectionChanged(_ResetEventArgs);
+        if (CollectionChanged != null)
+        {
+            OnCollectionChanged(_ResetEventArgs);
+        }
+        if (Changed != null)
+        {
+            RaiseChanged(LargeCollectionChangedEventArgs<T>.Reset());
+        }
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -798,36 +1049,26 @@ public class LargeObservableCollection<T> : ILargeObservableCollection<T>
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public long IndexOf(T item)
-        => _List.IndexOf(item);
-
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public long IndexOf(T item, long offset, long count)
+    public long IndexOf(T item, long? offset = null, long? count = null)
         => _List.IndexOf(item, offset, count);
 
+    /// <summary>
+    /// Finds the index of the first occurrence of an item using a generic equality comparer for optimal performance.
+    /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public long IndexOf(T item, Func<T, T, bool> equalsFunction)
-        => _List.IndexOf(item, equalsFunction);
+    public long IndexOf<TComparer>(T item, ref TComparer comparer, long? offset = null, long? count = null) where TComparer : IEqualityComparer<T>
+        => _List.IndexOf(item, ref comparer, offset, count);
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public long IndexOf(T item, long offset, long count, Func<T, T, bool> equalsFunction)
-        => _List.IndexOf(item, offset, count, equalsFunction);
-
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public long LastIndexOf(T item)
-        => _List.LastIndexOf(item);
-
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public long LastIndexOf(T item, long offset, long count)
+    public long LastIndexOf(T item, long? offset = null, long? count = null)
         => _List.LastIndexOf(item, offset, count);
 
+    /// <summary>
+    /// Finds the index of the last occurrence of an item using a generic equality comparer for optimal performance.
+    /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public long LastIndexOf(T item, Func<T, T, bool> equalsFunction)
-        => _List.LastIndexOf(item, equalsFunction);
-
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public long LastIndexOf(T item, long offset, long count, Func<T, T, bool> equalsFunction)
-        => _List.LastIndexOf(item, offset, count, equalsFunction);
+    public long LastIndexOf<TComparer>(T item, ref TComparer comparer, long? offset = null, long? count = null) where TComparer : IEqualityComparer<T>
+        => _List.LastIndexOf(item, ref comparer, offset, count);
 
     internal class NotificationSuspender : IDisposable
     {

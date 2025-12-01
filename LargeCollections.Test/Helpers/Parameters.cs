@@ -23,7 +23,7 @@ public static class Parameters
         get
         {
             HashSet<long> seen = new HashSet<long>();
-            foreach (var capacity in BaseCapacities.SelectMany(c => new[] { c - 1, c, c + 1 }).Distinct())
+            foreach (long capacity in BaseCapacities.SelectMany(c => new[] { c - 1, c, c + 1 }).Distinct())
             {
                 if (capacity >= 0 && capacity <= Constants.MaxLargeCollectionCount)
                 {

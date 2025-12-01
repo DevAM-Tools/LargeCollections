@@ -639,24 +639,15 @@ public class StorageTest
 
     [Test]
     [MethodDataSource(nameof(CapacitiesProvider))]
-    public async Task StorageSort_NullComparer_NoChange(long capacity)
+    public async Task StorageSort_NullComparer_ThrowsArgumentNullException(long capacity)
     {
-        if (capacity <= 0) return;
+        if (capacity <= 1) return; // Sort with count <= 1 returns early without checking comparer
         int[][] storage = StorageExtensions.StorageCreate<int>(capacity);
         // Create a deterministic pattern
         for (long i = 0; i < capacity; i++) storage.StorageSet(i, (int)((capacity - i) % 997));
-        // Snapshot a few sample positions
-        long i0 = 0L;
-        long i1 = capacity / 2L;
-        long i2 = capacity > 0 ? capacity - 1L : 0L;
-        int before0 = storage.StorageGet(i0);
-        int before1 = capacity > 0 ? storage.StorageGet(i1) : 0;
-        int before2 = storage.StorageGet(i2);
-        storage.StorageSort(null, 0L, capacity);
-        // unchanged at sample points
-        await Assert.That(storage.StorageGet(i0)).IsEqualTo(before0);
-        if (capacity > 0) await Assert.That(storage.StorageGet(i1)).IsEqualTo(before1);
-        await Assert.That(storage.StorageGet(i2)).IsEqualTo(before2);
+        
+        // Should throw ArgumentNullException when comparer is null
+        await Assert.That(() => storage.StorageSort(null, 0L, capacity)).Throws<ArgumentNullException>();
     }
 
     [Test]
@@ -668,8 +659,10 @@ public class StorageTest
         for (long i = 0; i < capacity; i++) storage.StorageSet(i, (int)i);
         long notFound = storage.StorageBinarySearch((int)(capacity + 89L), (a, b) => a.CompareTo(b), 0L, capacity);
         await Assert.That(notFound).IsEqualTo(-1L);
-        long nullCmp = storage.StorageBinarySearch((int)(capacity / 2L), null, 0L, capacity);
-        await Assert.That(nullCmp).IsEqualTo(-1L);
+        
+        // Should throw ArgumentNullException when comparer is null
+        await Assert.That(() => storage.StorageBinarySearch((int)(capacity / 2L), null, 0L, capacity)).Throws<ArgumentNullException>();
+        
         long target = capacity / 2L;
         long negCount = storage.StorageBinarySearch((int)target, (a, b) => a.CompareTo(b), 2L, -1L);
         await Assert.That(negCount).IsEqualTo(target);
@@ -990,6 +983,87 @@ public class StorageTest
         {
             await Assert.That(target.StorageGet(readOffset + i)).IsEqualTo((byte)(((writeOffset + i) + 1) % 256));
         }
+    }
+
+    #endregion
+
+    #region Overlapping Copy Tests
+
+    [Test]
+    public async Task StorageCopyTo_OverlappingForward_PreservesData()
+    {
+        // Test copying within the same array where target > source (forward overlap)
+        // This should copy backwards to prevent data corruption
+        long[][] storage = StorageExtensions.StorageCreate<long>(20);
+        for (long i = 0; i < 20; i++) storage.StorageSet(i, i * 10);
+
+        // Copy positions 0-9 to positions 5-14 (overlapping region: 5-9)
+        storage.StorageCopyTo(storage, 0L, 5L, 10L);
+
+        // Expected: positions 5-14 should contain original 0-9 values (0, 10, 20, 30, 40, 50, 60, 70, 80, 90)
+        await Assert.That(storage.StorageGet(5L)).IsEqualTo(0L);
+        await Assert.That(storage.StorageGet(6L)).IsEqualTo(10L);
+        await Assert.That(storage.StorageGet(7L)).IsEqualTo(20L);
+        await Assert.That(storage.StorageGet(8L)).IsEqualTo(30L);
+        await Assert.That(storage.StorageGet(9L)).IsEqualTo(40L);
+        await Assert.That(storage.StorageGet(10L)).IsEqualTo(50L);
+        await Assert.That(storage.StorageGet(11L)).IsEqualTo(60L);
+        await Assert.That(storage.StorageGet(12L)).IsEqualTo(70L);
+        await Assert.That(storage.StorageGet(13L)).IsEqualTo(80L);
+        await Assert.That(storage.StorageGet(14L)).IsEqualTo(90L);
+
+        // Original positions 0-4 should be unchanged
+        await Assert.That(storage.StorageGet(0L)).IsEqualTo(0L);
+        await Assert.That(storage.StorageGet(1L)).IsEqualTo(10L);
+        await Assert.That(storage.StorageGet(2L)).IsEqualTo(20L);
+        await Assert.That(storage.StorageGet(3L)).IsEqualTo(30L);
+        await Assert.That(storage.StorageGet(4L)).IsEqualTo(40L);
+    }
+
+    [Test]
+    public async Task StorageCopyTo_OverlappingBackward_PreservesData()
+    {
+        // Test copying within the same array where target < source (backward overlap)
+        // Standard forward copy should work correctly
+        long[][] storage = StorageExtensions.StorageCreate<long>(20);
+        for (long i = 0; i < 20; i++) storage.StorageSet(i, i * 10);
+
+        // Copy positions 5-14 to positions 0-9 (overlapping region: 5-9)
+        storage.StorageCopyTo(storage, 5L, 0L, 10L);
+
+        // Expected: positions 0-9 should contain original 5-14 values (50, 60, 70, 80, 90, 100, 110, 120, 130, 140)
+        await Assert.That(storage.StorageGet(0L)).IsEqualTo(50L);
+        await Assert.That(storage.StorageGet(1L)).IsEqualTo(60L);
+        await Assert.That(storage.StorageGet(2L)).IsEqualTo(70L);
+        await Assert.That(storage.StorageGet(3L)).IsEqualTo(80L);
+        await Assert.That(storage.StorageGet(4L)).IsEqualTo(90L);
+        await Assert.That(storage.StorageGet(5L)).IsEqualTo(100L);
+        await Assert.That(storage.StorageGet(6L)).IsEqualTo(110L);
+        await Assert.That(storage.StorageGet(7L)).IsEqualTo(120L);
+        await Assert.That(storage.StorageGet(8L)).IsEqualTo(130L);
+        await Assert.That(storage.StorageGet(9L)).IsEqualTo(140L);
+    }
+
+    [Test]
+    public async Task StorageCopyTo_NonOverlapping_WorksCorrectly()
+    {
+        // Test copying within the same array with no overlap
+        long[][] storage = StorageExtensions.StorageCreate<long>(20);
+        for (long i = 0; i < 20; i++) storage.StorageSet(i, i * 10);
+
+        // Copy positions 0-4 to positions 15-19 (no overlap)
+        storage.StorageCopyTo(storage, 0L, 15L, 5L);
+
+        // Expected: positions 15-19 should contain original 0-4 values
+        await Assert.That(storage.StorageGet(15L)).IsEqualTo(0L);
+        await Assert.That(storage.StorageGet(16L)).IsEqualTo(10L);
+        await Assert.That(storage.StorageGet(17L)).IsEqualTo(20L);
+        await Assert.That(storage.StorageGet(18L)).IsEqualTo(30L);
+        await Assert.That(storage.StorageGet(19L)).IsEqualTo(40L);
+
+        // Original positions should be unchanged
+        await Assert.That(storage.StorageGet(0L)).IsEqualTo(0L);
+        await Assert.That(storage.StorageGet(1L)).IsEqualTo(10L);
     }
 
     #endregion

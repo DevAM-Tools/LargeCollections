@@ -1,4 +1,4 @@
-﻿/*
+/*
 MIT License
 SPDX-License-Identifier: MIT
 
@@ -47,11 +47,11 @@ public class LargeDictionaryTest
     {
         if (capacity <= 0 || capacity > Constants.MaxLargeCollectionCount)
         {
-            await Assert.That(() => new LargeDictionary<long, long>(capacity: capacity)).Throws<Exception>();
+            await Assert.That(() => LargeDictionary.Create<long, long>(capacity: capacity)).Throws<Exception>();
             return;
         }
 
-        LargeDictionary<long, long> dictionary = new(capacity: capacity);
+        var dictionary = LargeDictionary.Create<long, long>(capacity: capacity);
 
         await Assert.That(dictionary.Count).IsEqualTo(0L);
         await Assert.That(dictionary.Capacity).IsEqualTo(capacity);
@@ -69,17 +69,17 @@ public class LargeDictionaryTest
     [Test]
     public async Task Constructor_ThrowsOnInvalidParameters()
     {
-        await Assert.That(() => new LargeDictionary<string, int>(capacity: 0)).Throws<Exception>();
-        await Assert.That(() => new LargeDictionary<string, int>(capacity: Constants.MaxLargeCollectionCount + 1)).Throws<Exception>();
-        await Assert.That(() => new LargeDictionary<string, int>(capacityGrowFactor: 1.0)).Throws<Exception>();
-        await Assert.That(() => new LargeDictionary<string, int>(capacityGrowFactor: Constants.MaxCapacityGrowFactor + 0.1)).Throws<Exception>();
-        await Assert.That(() => new LargeDictionary<string, int>(fixedCapacityGrowAmount: 0)).Throws<Exception>();
-        await Assert.That(() => new LargeDictionary<string, int>(fixedCapacityGrowLimit: 0)).Throws<Exception>();
-        await Assert.That(() => new LargeDictionary<string, int>(minLoadFactor: -0.1)).Throws<Exception>();
-        await Assert.That(() => new LargeDictionary<string, int>(minLoadFactor: 0.9, maxLoadFactor: 0.8)).Throws<Exception>();
-        await Assert.That(() => new LargeDictionary<string, int>(maxLoadFactor: 0.0)).Throws<Exception>();
-        await Assert.That(() => new LargeDictionary<string, int>(maxLoadFactor: 1.0, minLoadFactor: 1.0)).Throws<Exception>();
-        await Assert.That(() => new LargeDictionary<string, int>(minLoadFactorTolerance: -0.1)).Throws<Exception>();
+        await Assert.That(() => LargeDictionary.Create<string, int>(capacity: 0)).Throws<Exception>();
+        await Assert.That(() => LargeDictionary.Create<string, int>(capacity: Constants.MaxLargeCollectionCount + 1)).Throws<Exception>();
+        await Assert.That(() => LargeDictionary.Create<string, int>(capacityGrowFactor: 1.0)).Throws<Exception>();
+        await Assert.That(() => LargeDictionary.Create<string, int>(capacityGrowFactor: Constants.MaxCapacityGrowFactor + 0.1)).Throws<Exception>();
+        await Assert.That(() => LargeDictionary.Create<string, int>(fixedCapacityGrowAmount: 0)).Throws<Exception>();
+        await Assert.That(() => LargeDictionary.Create<string, int>(fixedCapacityGrowLimit: 0)).Throws<Exception>();
+        await Assert.That(() => LargeDictionary.Create<string, int>(minLoadFactor: -0.1)).Throws<Exception>();
+        await Assert.That(() => LargeDictionary.Create<string, int>(minLoadFactor: 0.9, maxLoadFactor: 0.8)).Throws<Exception>();
+        await Assert.That(() => LargeDictionary.Create<string, int>(maxLoadFactor: 0.0)).Throws<Exception>();
+        await Assert.That(() => LargeDictionary.Create<string, int>(maxLoadFactor: 1.0, minLoadFactor: 1.0)).Throws<Exception>();
+        await Assert.That(() => LargeDictionary.Create<string, int>(minLoadFactorTolerance: -0.1)).Throws<Exception>();
     }
 
     [Test]
@@ -87,7 +87,7 @@ public class LargeDictionaryTest
     public async Task LoadFactor_TracksCountAndCapacity(long capacity)
     {
         long actualCapacity = Math.Max(1L, Math.Min(capacity, Constants.MaxLargeCollectionCount));
-        LargeDictionary<long, long> dictionary = new(capacity: actualCapacity, maxLoadFactor: 1.0 + double.Epsilon);
+        var dictionary = LargeDictionary.Create<long, long>(capacity: actualCapacity, maxLoadFactor: 1.0 + double.Epsilon);
 
         long addCount = Math.Min(actualCapacity, 3L);
         for (long i = 0; i < addCount; i++)
@@ -106,7 +106,7 @@ public class LargeDictionaryTest
     [Test]
     public async Task Indexer_ThrowsOnNullKey()
     {
-        LargeDictionary<string, int> dictionary = new(capacity: 2);
+        var dictionary = LargeDictionary.Create<string, int>(capacity: 2);
 
         await Assert.That(() => dictionary[null!]).Throws<Exception>();
         await Assert.That(() => dictionary[null!] = 1).Throws<Exception>();
@@ -117,7 +117,7 @@ public class LargeDictionaryTest
     public async Task Indexer_GetAndSet_StoresValues(long capacity)
     {
         long actualCapacity = Math.Max(1L, Math.Min(capacity, Constants.MaxLargeCollectionCount));
-        LargeDictionary<long, long> dictionary = new(capacity: actualCapacity);
+        var dictionary = LargeDictionary.Create<long, long>(capacity: actualCapacity);
 
         dictionary[KeyMarkerBase] = ValueMarkerBase;
         await Assert.That(dictionary[KeyMarkerBase]).IsEqualTo(ValueMarkerBase);
@@ -129,7 +129,7 @@ public class LargeDictionaryTest
     [Test]
     public async Task Set_ThrowsOnNullKey()
     {
-        LargeDictionary<string, int> dictionary = new(capacity: 2);
+        var dictionary = LargeDictionary.Create<string, int>(capacity: 2);
 
         await Assert.That(() => dictionary.Set(null!, 0)).Throws<Exception>();
     }
@@ -139,7 +139,7 @@ public class LargeDictionaryTest
     public async Task Set_ReplacesExistingValue(long capacity)
     {
         long actualCapacity = Math.Max(1L, Math.Min(capacity, Constants.MaxLargeCollectionCount));
-        LargeDictionary<long, long> dictionary = new(capacity: actualCapacity);
+        var dictionary = LargeDictionary.Create<long, long>(capacity: actualCapacity);
 
         dictionary.Set(KeyMarkerBase, ValueMarkerBase);
         dictionary.Set(KeyMarkerBase, ValueMarkerBase + 10L);
@@ -151,7 +151,7 @@ public class LargeDictionaryTest
     [Test]
     public async Task Add_ThrowsOnNullKey()
     {
-        LargeDictionary<string, int> dictionary = new(capacity: 2);
+        var dictionary = LargeDictionary.Create<string, int>(capacity: 2);
         await Assert.That(() => dictionary.Add(new KeyValuePair<string, int>(null!, 0))).Throws<Exception>();
     }
 
@@ -160,7 +160,7 @@ public class LargeDictionaryTest
     public async Task Add_AddsUniqueKeys(long capacity)
     {
         long actualCapacity = Math.Max(1L, Math.Min(capacity, Constants.MaxLargeCollectionCount));
-        LargeDictionary<long, long> dictionary = new(capacity: actualCapacity);
+        var dictionary = LargeDictionary.Create<long, long>(capacity: actualCapacity);
 
         long addCount = Math.Min(actualCapacity, 5L);
         for (long i = 0; i < addCount; i++)
@@ -180,7 +180,7 @@ public class LargeDictionaryTest
     [Test]
     public async Task Add_Throws_WhenExceedingMaxCapacity()
     {
-        LargeDictionary<long, long> dictionary = new(capacity: 1, maxLoadFactor: double.MaxValue);
+        var dictionary = LargeDictionary.Create<long, long>(capacity: 1, maxLoadFactor: double.MaxValue);
 
         for (long i = 0; i < Constants.MaxLargeCollectionCount; i++)
         {
@@ -200,7 +200,7 @@ public class LargeDictionaryTest
     public async Task AddRange_IEnumerable_Branches(long capacity)
     {
         long actualCapacity = Math.Max(1L, Math.Min(capacity, Constants.MaxLargeCollectionCount));
-        LargeDictionary<long, long> dictionary = new(capacity: actualCapacity);
+        var dictionary = LargeDictionary.Create<long, long>(capacity: actualCapacity);
 
         long listCount = Math.Max(1L, Math.Min(actualCapacity, 5L));
         List<KeyValuePair<long, long>> listItems = CreatePairList(listCount, KeyMarkerBase, ValueMarkerBase);
@@ -224,7 +224,7 @@ public class LargeDictionaryTest
     public async Task AddRange_IReadOnlyLargeArray_Overloads(long capacity)
     {
         long actualCapacity = Math.Max(1L, Math.Min(capacity, Constants.MaxLargeCollectionCount));
-        LargeDictionary<long, long> dictionary = new(capacity: actualCapacity);
+        var dictionary = LargeDictionary.Create<long, long>(capacity: actualCapacity);
 
         LargeArray<KeyValuePair<long, long>> array = CreateSequentialPairs(actualCapacity);
 
@@ -256,7 +256,7 @@ public class LargeDictionaryTest
         LargeArray<KeyValuePair<long, long>> array = CreateSequentialPairs(actualCapacity);
         ReadOnlyLargeSpan<KeyValuePair<long, long>> span = new(array, 0L, array.Count);
 
-        LargeDictionary<long, long> dictionary = new(capacity: actualCapacity);
+        var dictionary = LargeDictionary.Create<long, long>(capacity: actualCapacity);
         dictionary.AddRange(span);
 
         Dictionary<long, long> expected = ToDictionary(array.GetAll());
@@ -278,7 +278,7 @@ public class LargeDictionaryTest
             .Select(i => new KeyValuePair<long, long>(KeyMarkerBase + i, ValueMarkerBase + i))
             .ToArray();
 
-        LargeDictionary<long, long> dictionary = new(capacity: actualCapacity);
+        var dictionary = LargeDictionary.Create<long, long>(capacity: actualCapacity);
         dictionary.AddRange(buffer.AsSpan());
 
         Dictionary<long, long> expected = buffer.ToDictionary(kvp => kvp.Key, kvp => kvp.Value);
@@ -293,7 +293,7 @@ public class LargeDictionaryTest
     [Test]
     public async Task Extend_Occurs_WhenLoadFactorExceeded()
     {
-        LargeDictionary<long, long> dictionary = new(capacity: 1, capacityGrowFactor: 1.5, fixedCapacityGrowAmount: 1, fixedCapacityGrowLimit: 2, maxLoadFactor: 0.5, minLoadFactor: 0.4, minLoadFactorTolerance: 0.5);
+        var dictionary = LargeDictionary.Create<long, long>(capacity: 1, capacityGrowFactor: 1.5, fixedCapacityGrowAmount: 1, fixedCapacityGrowLimit: 2, maxLoadFactor: 0.5, minLoadFactor: 0.4, minLoadFactorTolerance: 0.5);
 
         long initialCapacity = dictionary.Capacity;
         dictionary.Add(new KeyValuePair<long, long>(KeyMarkerBase, ValueMarkerBase));
@@ -308,7 +308,7 @@ public class LargeDictionaryTest
     [Test]
     public async Task Remove_ThrowsOnNullKey()
     {
-        LargeDictionary<string, int> dictionary = new(capacity: 2);
+        var dictionary = LargeDictionary.Create<string, int>(capacity: 2);
         await Assert.That(() => dictionary.Remove(null!)).Throws<Exception>();
         await Assert.That(() => dictionary.Remove(null!, out _)).Throws<Exception>();
         await Assert.That(() => dictionary.Remove(new KeyValuePair<string, int>(null!, 0))).Throws<Exception>();
@@ -320,7 +320,7 @@ public class LargeDictionaryTest
     public async Task Remove_ByKey_RemovesItem(long capacity)
     {
         long actualCapacity = Math.Max(1L, Math.Min(capacity, Constants.MaxLargeCollectionCount));
-        LargeDictionary<long, long> dictionary = new(capacity: actualCapacity);
+        var dictionary = LargeDictionary.Create<long, long>(capacity: actualCapacity);
 
         dictionary.Set(KeyMarkerBase, ValueMarkerBase);
         bool removed = dictionary.Remove(KeyMarkerBase);
@@ -332,7 +332,7 @@ public class LargeDictionaryTest
     [Test]
     public async Task Remove_ByKey_ReturnsRemovedValue()
     {
-        LargeDictionary<long, long> dictionary = new(capacity: 2);
+        var dictionary = LargeDictionary.Create<long, long>(capacity: 2);
         dictionary.Set(KeyMarkerBase, ValueMarkerBase);
 
         bool removed = dictionary.Remove(KeyMarkerBase, out long value);
@@ -344,7 +344,7 @@ public class LargeDictionaryTest
     [Test]
     public async Task Remove_KeyValuePair_RemovesRegardlessOfValue()
     {
-        LargeDictionary<long, long> dictionary = new(capacity: 2);
+        var dictionary = LargeDictionary.Create<long, long>(capacity: 2);
         dictionary.Set(KeyMarkerBase, ValueMarkerBase);
 
         bool removed = dictionary.Remove(new KeyValuePair<long, long>(KeyMarkerBase, ValueMarkerBase + 1));
@@ -356,7 +356,7 @@ public class LargeDictionaryTest
     [Test]
     public async Task Remove_KeyValuePair_OutParameter_ReturnsRemovedItem()
     {
-        LargeDictionary<long, long> dictionary = new(capacity: 2);
+        var dictionary = LargeDictionary.Create<long, long>(capacity: 2);
         dictionary.Set(KeyMarkerBase, ValueMarkerBase);
 
         bool removed = dictionary.Remove(new KeyValuePair<long, long>(KeyMarkerBase, 0L), out KeyValuePair<long, long> removedItem);
@@ -369,7 +369,7 @@ public class LargeDictionaryTest
     [Test]
     public async Task Remove_ReturnsFalse_WhenMissing()
     {
-        LargeDictionary<long, long> dictionary = new(capacity: 2);
+        var dictionary = LargeDictionary.Create<long, long>(capacity: 2);
 
         bool removed = dictionary.Remove(KeyMarkerBase);
         await Assert.That(removed).IsFalse();
@@ -382,7 +382,7 @@ public class LargeDictionaryTest
     [Test]
     public async Task Remove_TriggersShrink_WhenBelowThreshold()
     {
-        LargeDictionary<long, long> dictionary = new(capacity: 4, capacityGrowFactor: 1.5, fixedCapacityGrowAmount: 1, fixedCapacityGrowLimit: 2, minLoadFactor: 0.75, maxLoadFactor: 0.95, minLoadFactorTolerance: 0.9);
+        var dictionary = LargeDictionary.Create<long, long>(capacity: 4, capacityGrowFactor: 1.5, fixedCapacityGrowAmount: 1, fixedCapacityGrowLimit: 2, minLoadFactor: 0.75, maxLoadFactor: 0.95, minLoadFactorTolerance: 0.9);
 
         for (int i = 0; i < 4; i++)
         {
@@ -403,7 +403,7 @@ public class LargeDictionaryTest
     public async Task Clear_EmptiesDictionary(long capacity)
     {
         long actualCapacity = Math.Max(1L, Math.Min(capacity, Constants.MaxLargeCollectionCount));
-        LargeDictionary<long, long> dictionary = new(capacity: actualCapacity);
+        var dictionary = LargeDictionary.Create<long, long>(capacity: actualCapacity);
         dictionary.Set(KeyMarkerBase, ValueMarkerBase);
         dictionary.Set(KeyMarkerBase + 1, ValueMarkerBase + 1);
 
@@ -421,21 +421,21 @@ public class LargeDictionaryTest
     [Test]
     public async Task ContainsKey_ThrowsOnNullKey()
     {
-        LargeDictionary<string, int> dictionary = new(capacity: 2);
+        var dictionary = LargeDictionary.Create<string, int>(capacity: 2);
         await Assert.That(() => dictionary.ContainsKey(null!)).Throws<Exception>();
     }
 
     [Test]
     public async Task TryGetValue_ThrowsOnNullKey()
     {
-        LargeDictionary<string, int> dictionary = new(capacity: 2);
+        var dictionary = LargeDictionary.Create<string, int>(capacity: 2);
         await Assert.That(() => dictionary.TryGetValue(null!, out _)).Throws<Exception>();
     }
 
     [Test]
     public async Task Get_ThrowsWhenKeyMissing()
     {
-        LargeDictionary<long, long> dictionary = new(capacity: 2);
+        var dictionary = LargeDictionary.Create<long, long>(capacity: 2);
         await Assert.That(() => dictionary.Get(KeyMarkerBase)).Throws<Exception>();
     }
 
@@ -444,7 +444,7 @@ public class LargeDictionaryTest
     public async Task ContainsKey_ReturnsExpected(long capacity)
     {
         long actualCapacity = Math.Max(1L, Math.Min(capacity, Constants.MaxLargeCollectionCount));
-        LargeDictionary<long, long> dictionary = new(capacity: actualCapacity);
+        var dictionary = LargeDictionary.Create<long, long>(capacity: actualCapacity);
 
         dictionary.Set(KeyMarkerBase, ValueMarkerBase);
 
@@ -455,7 +455,7 @@ public class LargeDictionaryTest
     [Test]
     public async Task Contains_KeyValuePair_UsesValueEquality()
     {
-        LargeDictionary<long, long> dictionary = new(capacity: 2);
+        var dictionary = LargeDictionary.Create<long, long>(capacity: 2);
         dictionary.Set(KeyMarkerBase, ValueMarkerBase);
 
         await Assert.That(dictionary.Contains(new KeyValuePair<long, long>(KeyMarkerBase, ValueMarkerBase))).IsTrue();
@@ -468,7 +468,7 @@ public class LargeDictionaryTest
     public async Task TryGetValue_ReturnsExpected(long capacity)
     {
         long actualCapacity = Math.Max(1L, Math.Min(capacity, Constants.MaxLargeCollectionCount));
-        LargeDictionary<long, long> dictionary = new(capacity: actualCapacity);
+        var dictionary = LargeDictionary.Create<long, long>(capacity: actualCapacity);
 
         dictionary.Set(KeyMarkerBase, ValueMarkerBase);
 
@@ -484,7 +484,7 @@ public class LargeDictionaryTest
     [Test]
     public async Task TryGetOrSetDefault_AddsDefaultValue()
     {
-        LargeDictionary<long, long> dictionary = new(capacity: 2);
+        var dictionary = LargeDictionary.Create<long, long>(capacity: 2);
 
         bool existed = dictionary.TryGetOrSetDefault(KeyMarkerBase, out long value1);
         await Assert.That(existed).IsFalse();
@@ -499,14 +499,14 @@ public class LargeDictionaryTest
     [Test]
     public async Task TryGetOrSetDefault_ThrowsOnNullKey()
     {
-        LargeDictionary<string, int> dictionary = new(capacity: 2);
+        var dictionary = LargeDictionary.Create<string, int>(capacity: 2);
         await Assert.That(() => dictionary.TryGetOrSetDefault(null!, out _)).Throws<Exception>();
     }
 
     [Test]
     public async Task TryGetOrSet_AddsOrReturnsExisting()
     {
-        LargeDictionary<long, long> dictionary = new(capacity: 2);
+        var dictionary = LargeDictionary.Create<long, long>(capacity: 2);
 
         bool existed = dictionary.TryGetOrSet(KeyMarkerBase, ValueMarkerBase, out long value1);
         await Assert.That(existed).IsFalse();
@@ -520,14 +520,14 @@ public class LargeDictionaryTest
     [Test]
     public async Task TryGetOrSetValue_ThrowsOnNullKey()
     {
-        LargeDictionary<string, int> dictionary = new(capacity: 2);
+        var dictionary = LargeDictionary.Create<string, int>(capacity: 2);
         await Assert.That(() => dictionary.TryGetOrSet(null!, 42, out _)).Throws<Exception>();
     }
 
     [Test]
     public async Task TryGetOrSetFactory_UsesFactoryOnce()
     {
-        LargeDictionary<string, int> dictionary = new(static (l, r) => string.Equals(l, r, StringComparison.OrdinalIgnoreCase), static key => key.ToUpperInvariant().GetHashCode(), capacity: 2);
+        var dictionary = LargeDictionary.Create<string, int>(static (l, r) => string.Equals(l, r, StringComparison.OrdinalIgnoreCase), static key => key.ToUpperInvariant().GetHashCode(), capacity: 2);
 
         int factoryCalls = 0;
         bool existed = dictionary.TryGetOrSet("foo", () =>
@@ -556,14 +556,14 @@ public class LargeDictionaryTest
     [Test]
     public async Task TryGetOrSetFactory_ThrowsOnNullKey()
     {
-        LargeDictionary<string, int> dictionary = new(capacity: 2);
+        var dictionary = LargeDictionary.Create<string, int>(capacity: 2);
         await Assert.That(() => dictionary.TryGetOrSet(null!, () => 1, out _)).Throws<Exception>();
     }
 
     [Test]
     public async Task TryGetOrSet_ThrowsWhenFull()
     {
-        LargeDictionary<long, long> dictionary = new(capacity: 1, maxLoadFactor: double.MaxValue);
+        var dictionary = LargeDictionary.Create<long, long>(capacity: 1, maxLoadFactor: double.MaxValue);
 
         for (long i = 0; i < Constants.MaxLargeCollectionCount; i++)
         {
@@ -582,7 +582,7 @@ public class LargeDictionaryTest
     public async Task Keys_ReturnAllKeys(long capacity)
     {
         long actualCapacity = Math.Max(1L, Math.Min(capacity, Constants.MaxLargeCollectionCount));
-        LargeDictionary<long, long> dictionary = new(capacity: actualCapacity);
+        var dictionary = LargeDictionary.Create<long, long>(capacity: actualCapacity);
 
         long addCount = Math.Max(1L, Math.Min(actualCapacity, 5L));
         for (long i = 0; i < addCount; i++)
@@ -600,7 +600,7 @@ public class LargeDictionaryTest
     public async Task Values_ReturnAllValues(long capacity)
     {
         long actualCapacity = Math.Max(1L, Math.Min(capacity, Constants.MaxLargeCollectionCount));
-        LargeDictionary<long, long> dictionary = new(capacity: actualCapacity);
+        var dictionary = LargeDictionary.Create<long, long>(capacity: actualCapacity);
 
         long addCount = Math.Max(1L, Math.Min(actualCapacity, 5L));
         for (long i = 0; i < addCount; i++)
@@ -618,7 +618,7 @@ public class LargeDictionaryTest
     public async Task GetAll_ReturnsAllPairs(long capacity)
     {
         long actualCapacity = Math.Max(1L, Math.Min(capacity, Constants.MaxLargeCollectionCount));
-        LargeDictionary<long, long> dictionary = new(capacity: actualCapacity);
+        var dictionary = LargeDictionary.Create<long, long>(capacity: actualCapacity);
 
         long addCount = Math.Max(1L, Math.Min(actualCapacity, 5L));
         for (long i = 0; i < addCount; i++)
@@ -636,7 +636,7 @@ public class LargeDictionaryTest
     public async Task Enumerator_YieldsAllItems(long capacity)
     {
         long actualCapacity = Math.Max(1L, Math.Min(capacity, Constants.MaxLargeCollectionCount));
-        LargeDictionary<long, long> dictionary = new(capacity: actualCapacity);
+        var dictionary = LargeDictionary.Create<long, long>(capacity: actualCapacity);
 
         long addCount = Math.Max(1L, Math.Min(actualCapacity, 5L));
         for (long i = 0; i < addCount; i++)
@@ -659,7 +659,7 @@ public class LargeDictionaryTest
     public async Task DoForEach_AppliesActions(long capacity)
     {
         long actualCapacity = Math.Max(1L, Math.Min(capacity, Constants.MaxLargeCollectionCount));
-        LargeDictionary<long, long> dictionary = new(capacity: actualCapacity);
+        var dictionary = LargeDictionary.Create<long, long>(capacity: actualCapacity);
 
         long addCount = Math.Max(1L, Math.Min(actualCapacity, 5L));
         for (long i = 0; i < addCount; i++)
@@ -671,12 +671,11 @@ public class LargeDictionaryTest
         dictionary.DoForEach(pair => sum += pair.Value);
         await Assert.That(sum).IsEqualTo(dictionary.GetAll().Sum(pair => pair.Value));
 
-        long userDataSum = 0;
-        dictionary.DoForEach(static (KeyValuePair<long, long> pair, ref long total) => total += pair.Value, ref userDataSum);
-        await Assert.That(userDataSum).IsEqualTo(dictionary.GetAll().Sum(pair => pair.Value));
+        SumValueAction sumAction = new ();
+        dictionary.DoForEach(ref sumAction);
+        await Assert.That(sumAction.Sum).IsEqualTo(dictionary.GetAll().Sum(pair => pair.Value));
 
         await Assert.That(() => dictionary.DoForEach((Action<KeyValuePair<long, long>>)null!)).Throws<Exception>();
-        await Assert.That(() => dictionary.DoForEach((ActionWithUserData<KeyValuePair<long, long>, long>)null!, ref userDataSum)).Throws<Exception>();
     }
 
     #endregion
@@ -684,20 +683,20 @@ public class LargeDictionaryTest
     #region Default helpers
 
     [Test]
-    public async Task DefaultKeyEqualsFunction_ComparesNullAndValues()
+    public async Task DefaultEqualsFunction_ComparesNullAndValues()
     {
-        await Assert.That(LargeDictionary<string, int>.DefaultKeyEqualsFunction(null!, null!)).IsTrue();
-        await Assert.That(LargeDictionary<string, int>.DefaultKeyEqualsFunction("a", null!)).IsFalse();
-        await Assert.That(LargeDictionary<string, int>.DefaultKeyEqualsFunction(null!, "b")).IsFalse();
-        await Assert.That(LargeDictionary<string, int>.DefaultKeyEqualsFunction("foo", "foo")).IsTrue();
-        await Assert.That(LargeDictionary<string, int>.DefaultKeyEqualsFunction("foo", "FOO")).IsFalse();
+        await Assert.That(DefaultFunctions<string>.DefaultEqualsFunction(null!, null!)).IsTrue();
+        await Assert.That(DefaultFunctions<string>.DefaultEqualsFunction("a", null!)).IsFalse();
+        await Assert.That(DefaultFunctions<string>.DefaultEqualsFunction(null!, "b")).IsFalse();
+        await Assert.That(DefaultFunctions<string>.DefaultEqualsFunction("foo", "foo")).IsTrue();
+        await Assert.That(DefaultFunctions<string>.DefaultEqualsFunction("foo", "FOO")).IsFalse();
     }
 
     [Test]
-    public async Task DefaultKeyHashCodeFunction_ReturnsExpectedValues()
+    public async Task DefaultHashCodeFunction_ReturnsExpectedValues()
     {
-        await Assert.That(LargeDictionary<string, int>.DefaultKeyHashCodeFunction(null!)).IsEqualTo(0);
-        await Assert.That(LargeDictionary<string, int>.DefaultKeyHashCodeFunction("foo")).IsEqualTo("foo".GetHashCode());
+        await Assert.That(DefaultFunctions<string>.DefaultHashCodeFunction(null!)).IsEqualTo(0);
+        await Assert.That(DefaultFunctions<string>.DefaultHashCodeFunction("foo")).IsEqualTo("foo".GetHashCode());
     }
 
     #endregion
@@ -754,5 +753,113 @@ public class LargeDictionaryTest
     }
 
     #endregion
+
+    #region Edge Cases
+
+    [Test]
+    public async Task CustomHashFunction_WithCollisions_ResolvesCorrectly()
+    {
+        // Use a hash function that always returns the same value (worst case)
+        var dict = LargeDictionary.Create<long, long>(
+            keyEqualsFunction: (a, b) => a == b,
+            keyHashCodeFunction: _ => 42,  // All keys hash to same bucket
+            capacity: 10
+        );
+
+        dict.Set(KeyMarkerBase, ValueMarkerBase);
+        dict.Set(KeyMarkerBase + 1, ValueMarkerBase + 1);
+        dict.Set(KeyMarkerBase + 2, ValueMarkerBase + 2);
+
+        await Assert.That(dict.Count).IsEqualTo(3L);
+        await Assert.That(dict.Get(KeyMarkerBase)).IsEqualTo(ValueMarkerBase);
+        await Assert.That(dict.Get(KeyMarkerBase + 1)).IsEqualTo(ValueMarkerBase + 1);
+        await Assert.That(dict.Get(KeyMarkerBase + 2)).IsEqualTo(ValueMarkerBase + 2);
+    }
+
+    [Test]
+    public async Task Set_UpdatesExistingValue()
+    {
+        var dict = LargeDictionary.Create<long, long>(capacity: 2);
+
+        dict.Set(KeyMarkerBase, ValueMarkerBase);
+        dict.Set(KeyMarkerBase, ValueMarkerBase + 100);
+
+        await Assert.That(dict.Count).IsEqualTo(1L);
+        await Assert.That(dict.Get(KeyMarkerBase)).IsEqualTo(ValueMarkerBase + 100);
+    }
+
+    [Test]
+    public async Task Remove_NonExistentKey_ReturnsFalse()
+    {
+        var dict = LargeDictionary.Create<long, long>(capacity: 2);
+        dict.Set(KeyMarkerBase, ValueMarkerBase);
+
+        bool removed = dict.Remove(KeyMarkerBase + 100);
+
+        await Assert.That(removed).IsFalse();
+        await Assert.That(dict.Count).IsEqualTo(1L);
+    }
+
+    [Test]
+    public async Task Remove_WithValueOut_ReturnsRemovedValue()
+    {
+        var dict = LargeDictionary.Create<long, long>(capacity: 2);
+        dict.Set(KeyMarkerBase, ValueMarkerBase);
+
+        bool removed = dict.Remove(KeyMarkerBase, out long removedValue);
+
+        await Assert.That(removed).IsTrue();
+        await Assert.That(removedValue).IsEqualTo(ValueMarkerBase);
+    }
+
+    [Test]
+    public async Task Shrink_ReducesCapacity()
+    {
+        var dict = LargeDictionary.Create<long, long>(capacity: 100, minLoadFactor: 0.25);
+
+        for (long i = 0; i < 10; i++)
+        {
+            dict.Set(KeyMarkerBase + i, ValueMarkerBase + i);
+        }
+
+        long capacityBefore = dict.Capacity;
+        dict.Shrink();
+        long capacityAfter = dict.Capacity;
+
+        await Assert.That(capacityAfter).IsLessThanOrEqualTo(capacityBefore);
+        await Assert.That(dict.Count).IsEqualTo(10L);  // Items preserved
+    }
+
+    [Test]
+    public async Task CaseInsensitiveStringKeys_WorkCorrectly()
+    {
+        var dict = LargeDictionary.Create<string, int>(
+            keyEqualsFunction: (a, b) => string.Equals(a, b, StringComparison.OrdinalIgnoreCase),
+            keyHashCodeFunction: key => key?.ToUpperInvariant().GetHashCode() ?? 0,
+            capacity: 10
+        );
+
+        dict.Set("Hello", 1);
+        dict.Set("HELLO", 2);  // Should update existing
+
+        await Assert.That(dict.Count).IsEqualTo(1L);
+        await Assert.That(dict.Get("hello")).IsEqualTo(2);
+        await Assert.That(dict.Get("HELLO")).IsEqualTo(2);
+        await Assert.That(dict.Get("Hello")).IsEqualTo(2);
+    }
+
+    #endregion
+
+    #region Helper Structs
+
+    private struct SumValueAction : ILargeAction<KeyValuePair<long, long>>
+    {
+        public long Sum;
+        public void Invoke(KeyValuePair<long, long> pair) => Sum += pair.Value;
+    }
+
+    #endregion
 }
+
+
 

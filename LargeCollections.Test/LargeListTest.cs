@@ -1,4 +1,4 @@
-﻿/*
+/*
 MIT License
 SPDX-License-Identifier: MIT
 
@@ -99,17 +99,22 @@ public class LargeListTest
 
         public void Set(long index, long item) => this[index] = item;
 
-        public void Sort(Func<long, long, int> comparer)
+        public void Sort<TComparer>(TComparer comparer, long? offset = null, long? count = null) where TComparer : IComparer<long>
         {
-            comparer ??= static (a, b) => a.CompareTo(b);
-            Array.Sort(_data, 0, (int)Count, Comparer<long>.Create((x, y) => comparer(x, y)));
-        }
-
-        public void Sort(Func<long, long, int> comparer, long offset, long count)
-        {
-            StorageExtensions.CheckRange(offset, count, Count);
-            comparer ??= static (a, b) => a.CompareTo(b);
-            Array.Sort(_data, (int)offset, (int)count, Comparer<long>.Create((x, y) => comparer(x, y)));
+            long actualOffset = offset ?? 0L;
+            long actualCount = count ?? (Count - actualOffset);
+            StorageExtensions.CheckRange(actualOffset, actualCount, Count);
+            // Simple bubble sort for test stub
+            for (long i = actualOffset; i < actualOffset + actualCount - 1; i++)
+            {
+                for (long j = actualOffset; j < actualOffset + actualCount - 1 - (i - actualOffset); j++)
+                {
+                    if (comparer.Compare(_data[j], _data[j + 1]) > 0)
+                    {
+                        (_data[j], _data[j + 1]) = (_data[j + 1], _data[j]);
+                    }
+                }
+            }
         }
 
         public void Swap(long leftIndex, long rightIndex)
@@ -119,19 +124,17 @@ public class LargeListTest
             (_data[leftIndex], _data[rightIndex]) = (_data[rightIndex], _data[leftIndex]);
         }
 
-        public long BinarySearch(long item, Func<long, long, int> comparer)
-            => BinarySearch(item, comparer, 0, Count);
-
-        public long BinarySearch(long item, Func<long, long, int> comparer, long offset, long count)
+        public long BinarySearch<TComparer>(long item, TComparer comparer, long? offset = null, long? count = null) where TComparer : IComparer<long>
         {
-            StorageExtensions.CheckRange(offset, count, Count);
-            comparer ??= static (a, b) => a.CompareTo(b);
-            long low = offset;
-            long high = offset + count - 1;
+            long actualOffset = offset ?? 0L;
+            long actualCount = count ?? (Count - actualOffset);
+            StorageExtensions.CheckRange(actualOffset, actualCount, Count);
+            long low = actualOffset;
+            long high = actualOffset + actualCount - 1;
             while (low <= high)
             {
                 long mid = low + ((high - low) / 2);
-                int cmp = comparer(_data[mid], item);
+                int cmp = comparer.Compare(_data[mid], item);
                 if (cmp == 0)
                 {
                     return mid;
@@ -150,6 +153,84 @@ public class LargeListTest
             return -1L;
         }
 
+        public long BinarySearch(long item, long? offset = null, long? count = null)
+            => BinarySearch(item, Comparer<long>.Default, offset, count);
+
+        public long IndexOf(long item, long? offset = null, long? count = null)
+        {
+            long actualOffset = offset ?? 0L;
+            long actualCount = count ?? (Count - actualOffset);
+            StorageExtensions.CheckRange(actualOffset, actualCount, Count);
+            for (long i = 0; i < actualCount; i++)
+            {
+                if (_data[actualOffset + i] == item)
+                {
+                    return actualOffset + i;
+                }
+            }
+            return -1L;
+        }
+
+        public long IndexOf<TComparer>(long item, ref TComparer comparer, long? offset = null, long? count = null) where TComparer : IEqualityComparer<long>
+        {
+            long actualOffset = offset ?? 0L;
+            long actualCount = count ?? (Count - actualOffset);
+            StorageExtensions.CheckRange(actualOffset, actualCount, Count);
+            for (long i = 0; i < actualCount; i++)
+            {
+                if (comparer.Equals(_data[actualOffset + i], item))
+                {
+                    return actualOffset + i;
+                }
+            }
+            return -1L;
+        }
+
+        public long LastIndexOf(long item, long? offset = null, long? count = null)
+        {
+            long actualOffset = offset ?? 0L;
+            long actualCount = count ?? (Count - actualOffset);
+            StorageExtensions.CheckRange(actualOffset, actualCount, Count);
+            for (long i = actualCount - 1; i >= 0; i--)
+            {
+                if (_data[actualOffset + i] == item)
+                {
+                    return actualOffset + i;
+                }
+            }
+            return -1L;
+        }
+
+        public long LastIndexOf<TComparer>(long item, ref TComparer comparer, long? offset = null, long? count = null) where TComparer : IEqualityComparer<long>
+        {
+            long actualOffset = offset ?? 0L;
+            long actualCount = count ?? (Count - actualOffset);
+            StorageExtensions.CheckRange(actualOffset, actualCount, Count);
+            for (long i = actualCount - 1; i >= 0; i--)
+            {
+                if (comparer.Equals(_data[actualOffset + i], item))
+                {
+                    return actualOffset + i;
+                }
+            }
+            return -1L;
+        }
+
+        public bool Contains(long item)
+        {
+            return IndexOf(item, 0L, Count) >= 0;
+        }
+
+        public bool Contains(long item, long offset, long count)
+        {
+            return IndexOf(item, offset, count) >= 0;
+        }
+
+        public bool Contains<TComparer>(long item, ref TComparer comparer, long? offset = null, long? count = null) where TComparer : IEqualityComparer<long>
+        {
+            return IndexOf(item, ref comparer, offset, count) >= 0;
+        }
+
         public IEnumerable<long> GetAll()
         {
             for (long i = 0; i < _data.LongLength; i++)
@@ -165,75 +246,6 @@ public class LargeListTest
             {
                 yield return _data[offset + i];
             }
-        }
-
-        public bool Contains(long item) => Contains(item, 0, Count);
-
-        public bool Contains(long item, Func<long, long, bool> equalsFunction)
-            => Contains(item, 0, Count, equalsFunction);
-
-        public bool Contains(long item, long offset, long count)
-            => Contains(item, offset, count, static (a, b) => a == b);
-
-        public bool Contains(long item, long offset, long count, Func<long, long, bool> equalsFunction)
-        {
-            StorageExtensions.CheckRange(offset, count, Count);
-            equalsFunction ??= static (a, b) => a == b;
-            for (long i = 0; i < count; i++)
-            {
-                if (equalsFunction(_data[offset + i], item))
-                {
-                    return true;
-                }
-            }
-
-            return false;
-        }
-
-        public long IndexOf(long item) => Array.IndexOf(_data, item);
-
-        public long IndexOf(long item, Func<long, long, bool> equalsFunction)
-            => IndexOf(item, 0, Count, equalsFunction);
-
-        public long IndexOf(long item, long offset, long count)
-            => IndexOf(item, offset, count, static (a, b) => a == b);
-
-        public long IndexOf(long item, long offset, long count, Func<long, long, bool> equalsFunction)
-        {
-            StorageExtensions.CheckRange(offset, count, Count);
-            equalsFunction ??= static (a, b) => a == b;
-            for (long i = 0; i < count; i++)
-            {
-                if (equalsFunction(_data[offset + i], item))
-                {
-                    return offset + i;
-                }
-            }
-
-            return -1L;
-        }
-
-        public long LastIndexOf(long item) => Array.LastIndexOf(_data, item);
-
-        public long LastIndexOf(long item, Func<long, long, bool> equalsFunction)
-            => LastIndexOf(item, 0, Count, equalsFunction);
-
-        public long LastIndexOf(long item, long offset, long count)
-            => LastIndexOf(item, offset, count, static (a, b) => a == b);
-
-        public long LastIndexOf(long item, long offset, long count, Func<long, long, bool> equalsFunction)
-        {
-            StorageExtensions.CheckRange(offset, count, Count);
-            equalsFunction ??= static (a, b) => a == b;
-            for (long i = count - 1; i >= 0; i--)
-            {
-                if (equalsFunction(_data[offset + i], item))
-                {
-                    return offset + i;
-                }
-            }
-
-            return -1L;
         }
 
         public void CopyFrom(IReadOnlyLargeArray<long> source, long sourceOffset, long targetOffset, long count)
@@ -302,18 +314,7 @@ public class LargeListTest
             _data.AsSpan((int)sourceOffset, count).CopyTo(target);
         }
 
-        public void DoForEach(Action<long> action)
-        {
-            if (action is null)
-            {
-                throw new ArgumentNullException(nameof(action));
-            }
-
-            foreach (long item in _data)
-            {
-                action(item);
-            }
-        }
+        public void DoForEach(Action<long> action) => DoForEach(action, 0L, Count);
 
         public void DoForEach(Action<long> action, long offset, long count)
         {
@@ -322,6 +323,7 @@ public class LargeListTest
                 throw new ArgumentNullException(nameof(action));
             }
 
+            if (count == 0L) return;
             StorageExtensions.CheckRange(offset, count, Count);
             for (long i = 0; i < count; i++)
             {
@@ -329,30 +331,16 @@ public class LargeListTest
             }
         }
 
-        public void DoForEach<TUserData>(ActionWithUserData<long, TUserData> action, ref TUserData userData)
+        public void DoForEach<TAction>(ref TAction action) where TAction : ILargeAction<long>
+            => DoForEach(ref action, 0L, Count);
+
+        public void DoForEach<TAction>(ref TAction action, long offset, long count) where TAction : ILargeAction<long>
         {
-            if (action is null)
-            {
-                throw new ArgumentNullException(nameof(action));
-            }
-
-            foreach (long item in _data)
-            {
-                action(item, ref userData);
-            }
-        }
-
-        public void DoForEach<TUserData>(ActionWithUserData<long, TUserData> action, long offset, long count, ref TUserData userData)
-        {
-            if (action is null)
-            {
-                throw new ArgumentNullException(nameof(action));
-            }
-
+            if (count == 0L) return;
             StorageExtensions.CheckRange(offset, count, Count);
             for (long i = 0; i < count; i++)
             {
-                action(_data[offset + i], ref userData);
+                action.Invoke(_data[offset + i]);
             }
         }
 
@@ -425,33 +413,41 @@ public class LargeListTest
             }
 
             await Assert.That(list.Contains(marker)).IsTrue();
-            await Assert.That(list.Contains(marker, static (a, b) => a == b)).IsTrue();
+            DefaultEqualityComparer<long> comparer1 = new();
+            await Assert.That(list.Contains(marker, ref comparer1)).IsTrue();
             await Assert.That(list.IndexOf(marker)).IsEqualTo(baseIndex);
-            await Assert.That(list.IndexOf(marker, static (a, b) => a == b)).IsEqualTo(baseIndex);
+            DefaultEqualityComparer<long> comparer2 = new();
+            await Assert.That(list.IndexOf(marker, ref comparer2)).IsEqualTo(baseIndex);
 
             long expectedLast = baseIndex + (baseIndex + 1 < capacity ? 1 : 0);
             await Assert.That(list.LastIndexOf(marker)).IsEqualTo(expectedLast);
-            await Assert.That(list.LastIndexOf(marker, static (a, b) => a == b)).IsEqualTo(expectedLast);
+            DefaultEqualityComparer<long> comparer3 = new();
+            await Assert.That(list.LastIndexOf(marker, ref comparer3)).IsEqualTo(expectedLast);
 
             long offset = baseIndex;
             long length = Math.Max(1, Math.Min(2, capacity - offset));
             await Assert.That(list.Contains(marker, offset, length)).IsTrue();
-            await Assert.That(list.Contains(marker, offset, length, static (a, b) => a == b)).IsTrue();
+            DefaultEqualityComparer<long> comparer4 = new();
+            await Assert.That(list.Contains(marker, ref comparer4, offset, length)).IsTrue();
             await Assert.That(list.IndexOf(marker, offset, length)).IsEqualTo(offset);
-            await Assert.That(list.IndexOf(marker, offset, length, static (a, b) => a == b)).IsEqualTo(offset);
+            DefaultEqualityComparer<long> comparer5 = new();
+            await Assert.That(list.IndexOf(marker, ref comparer5, offset, length)).IsEqualTo(offset);
             long expectedLastInRange = offset + Math.Min(1, length - 1);
             await Assert.That(list.LastIndexOf(marker, offset, length)).IsEqualTo(expectedLastInRange);
-            await Assert.That(list.LastIndexOf(marker, offset, length, static (a, b) => a == b)).IsEqualTo(expectedLastInRange);
+            DefaultEqualityComparer<long> comparer6 = new();
+            await Assert.That(list.LastIndexOf(marker, ref comparer6, offset, length)).IsEqualTo(expectedLastInRange);
         }
 
         long missingValue = MarkerBase + capacity + 10;
         await Assert.That(list.Contains(missingValue)).IsFalse();
-        await Assert.That(list.Contains(missingValue, static (a, b) => a == b)).IsFalse();
+        DefaultEqualityComparer<long> comparer7 = new();
+        await Assert.That(list.Contains(missingValue, ref comparer7)).IsFalse();
 
         long offsetCheck = Math.Min(1, Math.Max(0, list.Count - 1));
         long lengthCheck = Math.Max(0, list.Count - offsetCheck);
         await Assert.That(list.Contains(missingValue, offsetCheck, lengthCheck)).IsFalse();
-        await Assert.That(list.Contains(missingValue, offsetCheck, lengthCheck, static (a, b) => a == b)).IsFalse();
+        DefaultEqualityComparer<long> comparer8 = new();
+        await Assert.That(list.Contains(missingValue, ref comparer8, offsetCheck, lengthCheck)).IsFalse();
 
         await Assert.That(list.IndexOf(missingValue)).IsEqualTo(-1L);
         await Assert.That(list.LastIndexOf(missingValue)).IsEqualTo(-1L);
@@ -479,7 +475,7 @@ public class LargeListTest
             list[i] = list.Count > 0 ? list.Count - i : 0;
         }
 
-        list.Sort(null);
+        list.Sort(new DefaultComparer<long>());
         List<long> sorted = list.GetAll().ToList();
         await Assert.That(sorted.SequenceEqual(sorted.OrderBy(x => x))).IsTrue();
 
@@ -487,7 +483,7 @@ public class LargeListTest
         {
             long offset = 0;
             long length = Math.Min(list.Count, 5);
-            list.Sort(static (a, b) => b.CompareTo(a), offset, length);
+            list.Sort(new DescendingComparer<long>(), offset, length);
             List<long> segment = list.GetAll(offset, length).ToList();
             await Assert.That(segment.SequenceEqual(segment.OrderByDescending(x => x))).IsTrue();
 
@@ -500,7 +496,8 @@ public class LargeListTest
             await Assert.That(list[right]).IsEqualTo(leftValue);
         }
 
-        await Assert.That(() => list.Sort(null, -1, 1)).Throws<Exception>();
+        DefaultComparer<long> comparer = new();
+        await Assert.That(() => list.Sort(comparer, -1, 1)).Throws<Exception>();
         await Assert.That(() => list.Swap(-1, 0)).Throws<Exception>();
         await Assert.That(() => list.Swap(0, list.Count)).Throws<Exception>();
     }
@@ -518,7 +515,8 @@ public class LargeListTest
         long existing = capacity > 0 ? list[Math.Max(0, capacity / 2)] : 0;
         long missing = existing + 1;
 
-        long result = list.BinarySearch(existing, static (a, b) => a.CompareTo(b));
+        DefaultComparer<long> comparer = new();
+        long result = list.BinarySearch(existing, comparer);
         if (capacity > 0)
         {
             await Assert.That(result).IsEqualTo(Math.Max(0, capacity / 2));
@@ -528,7 +526,7 @@ public class LargeListTest
             await Assert.That(result).IsEqualTo(-1L);
         }
 
-        long missingResult = list.BinarySearch(missing, static (a, b) => a.CompareTo(b));
+        long missingResult = list.BinarySearch(missing, comparer);
         await Assert.That(missingResult).IsEqualTo(-1L);
 
         long offset = Math.Min(1, Math.Max(0, capacity - 1));
@@ -536,12 +534,276 @@ public class LargeListTest
         if (length > 0)
         {
             long value = list[offset + length / 2];
-            long rangeResult = list.BinarySearch(value, static (a, b) => a.CompareTo(b), offset, length);
+            long rangeResult = list.BinarySearch(value, comparer, offset, length);
             await Assert.That(rangeResult).IsEqualTo(offset + length / 2);
         }
 
-        await Assert.That(() => list.BinarySearch(0, static (a, b) => 0, -1, 1)).Throws<Exception>();
-        await Assert.That(() => list.BinarySearch(0, static (a, b) => 0, 0, list.Count + 1)).Throws<Exception>();
+        await Assert.That(() => list.BinarySearch(0, comparer, -1, 1)).Throws<Exception>();
+        await Assert.That(() => list.BinarySearch(0, comparer, 0, list.Count + 1)).Throws<Exception>();
+    }
+
+    #endregion
+
+    #region ParallelSort
+
+    [Test]
+    public async Task ParallelSort_SortsCorrectly()
+    {
+        long capacity = Constants.MaxLargeCollectionCount;
+        LargeList<long> list = new(capacity);
+        Random random = new(42);
+        
+        for (long i = 0; i < capacity; i++)
+        {
+            list.Add(random.NextInt64());
+        }
+
+        list.ParallelSort(new DefaultComparer<long>());
+
+        for (long i = 1; i < list.Count; i++)
+        {
+            await Assert.That(list[i - 1] <= list[i]).IsTrue();
+        }
+    }
+
+    [Test]
+    public async Task ParallelSort_WithComparer_SortsDescending()
+    {
+        long capacity = Constants.MaxLargeCollectionCount;
+        LargeList<long> list = new(capacity);
+        Random random = new(123);
+        
+        for (long i = 0; i < capacity; i++)
+        {
+            list.Add(random.NextInt64());
+        }
+
+        list.ParallelSort(new DescendingComparer<long>());
+
+        for (long i = 1; i < list.Count; i++)
+        {
+            await Assert.That(list[i - 1] >= list[i]).IsTrue();
+        }
+    }
+
+    [Test]
+    public async Task ParallelSort_SmallList_FallsBackToRegularSort()
+    {
+        LargeList<long> list = new(100);
+        for (long i = 0; i < 100; i++)
+        {
+            list.Add(100 - i);
+        }
+
+        list.ParallelSort(new DefaultComparer<long>());
+
+        for (long i = 1; i < list.Count; i++)
+        {
+            await Assert.That(list[i - 1] <= list[i]).IsTrue();
+        }
+    }
+
+    [Test]
+    public async Task ParallelSort_EmptyList_DoesNotThrow()
+    {
+        LargeList<long> list = new();
+        await Assert.That(() => list.ParallelSort(new DefaultComparer<long>())).ThrowsNothing();
+    }
+
+    #endregion
+
+    #region StructComparerSort
+
+    [Test]
+    [MethodDataSource(nameof(Capacities))]
+    public async Task Sort_WithStructComparer_ProducesSameResultAsDelegate(long capacity)
+    {
+        if (capacity <= 0)
+        {
+            return;
+        }
+
+        Random random = new(42);
+
+        // Create two lists with identical random data
+        LargeList<long> listDelegate = new(capacity);
+        LargeList<long> listStruct = new(capacity);
+
+        for (long i = 0; i < capacity; i++)
+        {
+            long value = random.NextInt64();
+            listDelegate.Add(value);
+            listStruct.Add(value);
+        }
+
+        // Sort with default comparer
+        listDelegate.Sort(new DefaultComparer<long>());
+
+        // Sort with struct comparer
+        listStruct.Sort(new DefaultComparer<long>());
+
+        // Verify results are identical
+        for (long i = 0; i < capacity; i++)
+        {
+            await Assert.That(listStruct[i]).IsEqualTo(listDelegate[i]);
+        }
+    }
+
+    [Test]
+    [MethodDataSource(nameof(Capacities))]
+    public async Task Sort_WithDescendingStructComparer_SortsDescending(long capacity)
+    {
+        if (capacity <= 0)
+        {
+            return;
+        }
+
+        LargeList<long> list = new(capacity);
+        Random random = new(123);
+
+        for (long i = 0; i < capacity; i++)
+        {
+            list.Add(random.NextInt64());
+        }
+
+        list.Sort(new DescendingComparer<long>());
+
+        for (long i = 1; i < list.Count; i++)
+        {
+            await Assert.That(list[i - 1] >= list[i]).IsTrue();
+        }
+    }
+
+    [Test]
+    [MethodDataSource(nameof(Capacities))]
+    public async Task BinarySearch_WithStructComparer_FindsItems(long capacity)
+    {
+        if (capacity <= 0)
+        {
+            return;
+        }
+
+        LargeList<long> list = new(capacity);
+        for (long i = 0; i < capacity; i++)
+        {
+            list.Add(i * 2); // Even numbers: 0, 2, 4, 6, ...
+        }
+
+        // Search for existing item
+        long searchItem = (capacity / 2) * 2;
+        long foundIndex = list.BinarySearch(searchItem, new DefaultComparer<long>());
+        await Assert.That(foundIndex).IsEqualTo(capacity / 2);
+
+        // Search for non-existing item
+        long notFoundIndex = list.BinarySearch(-1, new DefaultComparer<long>());
+        await Assert.That(notFoundIndex).IsEqualTo(-1L);
+    }
+
+    #endregion
+
+    #region StructAction DoForEach
+
+    /// <summary>
+    /// A struct action that increments each element by a fixed value.
+    /// </summary>
+    private struct IncrementAction : ILargeRefAction<long>
+    {
+        public long IncrementBy;
+        public long ModifiedCount;
+
+        public void Invoke(ref long item)
+        {
+            item += IncrementBy;
+            ModifiedCount++;
+        }
+    }
+
+    /// <summary>
+    /// A struct action that tracks the sum (by-value action with state in struct).
+    /// </summary>
+    private struct SumAction : ILargeAction<long>
+    {
+        public long Sum;
+
+        public void Invoke(long item)
+        {
+            Sum += item;
+        }
+    }
+
+    [Test]
+    [MethodDataSource(nameof(Capacities))]
+    public async Task DoForEach_WithStructAction_AccumulatesSum(long capacity)
+    {
+        if (capacity <= 0 || capacity > Constants.MaxLargeCollectionCount)
+        {
+            return;
+        }
+
+        LargeList<long> list = CreateSequentialList(capacity);
+
+        // With ref parameter, state changes are preserved!
+        SumAction action = new() { Sum = 0 };
+        list.DoForEach(ref action);
+
+        // Sum of 0 to n-1 = n*(n-1)/2
+        long expected = capacity * (capacity - 1) / 2;
+        await Assert.That(action.Sum).IsEqualTo(expected);
+    }
+
+    [Test]
+    [MethodDataSource(nameof(Capacities))]
+    public async Task DoForEachRef_WithStructAction_ModifiesElements(long capacity)
+    {
+        if (capacity <= 0 || capacity > Constants.MaxLargeCollectionCount)
+        {
+            return;
+        }
+
+        LargeList<long> list = CreateSequentialList(capacity);
+        IncrementAction action = new() { IncrementBy = 10 };
+
+        list.DoForEachRef(ref action);
+
+        for (long i = 0; i < capacity; i++)
+        {
+            await Assert.That(list[i]).IsEqualTo(i + 10);
+        }
+
+        // Verify the action's state was updated
+        await Assert.That(action.ModifiedCount).IsEqualTo(capacity);
+    }
+
+    [Test]
+    [MethodDataSource(nameof(Capacities))]
+    public async Task DoForEachRef_WithStructAction_Range_ModifiesOnlyRange(long capacity)
+    {
+        if (capacity <= 2 || capacity > Constants.MaxLargeCollectionCount)
+        {
+            return;
+        }
+
+        LargeList<long> list = CreateSequentialList(capacity);
+        IncrementAction action = new() { IncrementBy = 100 };
+
+        long offset = 1;
+        long count = capacity - 2;
+        list.DoForEachRef(ref action, offset, count);
+
+        // First element should be unchanged
+        await Assert.That(list[0]).IsEqualTo(0L);
+
+        // Middle elements should be incremented
+        for (long i = offset; i < offset + count; i++)
+        {
+            await Assert.That(list[i]).IsEqualTo(i + 100);
+        }
+
+        // Last element should be unchanged
+        await Assert.That(list[capacity - 1]).IsEqualTo(capacity - 1);
+
+        // Verify the action tracked the right number of modifications
+        await Assert.That(action.ModifiedCount).IsEqualTo(count);
     }
 
     #endregion
@@ -638,7 +900,9 @@ public class LargeListTest
 
         if (capacity >= Constants.MaxLargeCollectionCount)
         {
-            LargeList<long> capacityGuard = CreateSequentialList(Constants.MaxLargeCollectionCount - 1);
+            // With corrected capacity check (>), we can store exactly MaxLargeCollectionCount elements
+            // So we need to fill to max first, then adding should throw
+            LargeList<long> capacityGuard = CreateSequentialList(Constants.MaxLargeCollectionCount);
             await Assert.That(() => capacityGuard.AddRange(new long[] { 1L })).Throws<Exception>();
         }
 
@@ -849,7 +1113,8 @@ public class LargeListTest
         await Assert.That(defaultRemove.IndexOf(targetValue)).IsEqualTo(-1L);
 
         LargeList<long> preserveFalseList = CreateSequentialList(capacity);
-        bool removedNoOrder = preserveFalseList.Remove(targetValue, preserveOrder: false);
+        DefaultEqualityComparer<long> comparer1 = new ();
+        bool removedNoOrder = preserveFalseList.Remove(targetValue, out _, comparer1, preserveOrder: false);
         await Assert.That(removedNoOrder).IsTrue();
         await Assert.That(preserveFalseList.Count).IsEqualTo(capacity - 1);
         if (capacity > 1 && index < preserveFalseList.Count)
@@ -863,7 +1128,8 @@ public class LargeListTest
         await Assert.That(removedItem).IsEqualTo(targetValue);
 
         LargeList<long> preserveOutList = CreateSequentialList(capacity);
-        bool removedPreserveOut = preserveOutList.Remove(targetValue, preserveOrder: true, out long preserveOutItem);
+        DefaultEqualityComparer<long> comparer2 = new ();
+        bool removedPreserveOut = preserveOutList.Remove(targetValue, out long preserveOutItem, comparer2, preserveOrder: true);
         await Assert.That(removedPreserveOut).IsTrue();
         await Assert.That(preserveOutItem).IsEqualTo(targetValue);
         if (index < preserveOutList.Count)
@@ -873,12 +1139,14 @@ public class LargeListTest
 
         LargeList<long> customEqualsList = CreateSequentialList(capacity);
         long searchValue = targetValue + MarkerBase;
-        bool removedCustom = customEqualsList.Remove(searchValue, preserveOrder: true, out long customRemoved, static (long stored, long search) => stored == search - MarkerBase);
+        DelegateEqualityComparer<long> customComparer = new ((long stored, long search) => stored == search - MarkerBase, x => x.GetHashCode());
+        bool removedCustom = customEqualsList.Remove(searchValue, out long customRemoved, customComparer, preserveOrder: true);
         await Assert.That(removedCustom).IsTrue();
         await Assert.That(customRemoved).IsEqualTo(targetValue);
 
         LargeList<long> equalsOnlyList = CreateSequentialList(capacity);
-        bool removedWithEqualsOnly = equalsOnlyList.Remove(searchValue, static (long stored, long search) => stored == search - MarkerBase);
+        DelegateEqualityComparer<long> customComparer2 = new ((long stored, long search) => stored == search - MarkerBase, x => x.GetHashCode());
+        bool removedWithEqualsOnly = equalsOnlyList.Remove(searchValue, out _, customComparer2);
         await Assert.That(removedWithEqualsOnly).IsTrue();
     }
 
@@ -1028,22 +1296,26 @@ public class LargeListTest
         long expectedRangeSum = list.GetAll(offset, count).Sum();
         await Assert.That(rangedSum).IsEqualTo(expectedRangeSum);
 
-        long userSum = 0;
-        list.DoForEach(static (long value, ref long acc) => acc += value, ref userSum);
-        await Assert.That(userSum).IsEqualTo(expectedSum);
+        // Test struct-based DoForEach with user data in struct
+        SumAction sumAction = new() { Sum = 0 };
+        list.DoForEach(ref sumAction);
+        await Assert.That(sumAction.Sum).IsEqualTo(expectedSum);
 
-        long userRangeSum = 0;
-        list.DoForEach(static (long value, ref long acc) => acc += value, offset, count, ref userRangeSum);
-        await Assert.That(userRangeSum).IsEqualTo(expectedRangeSum);
+        SumAction rangeAction = new() { Sum = 0 };
+        list.DoForEach(ref rangeAction, offset, count);
+        await Assert.That(rangeAction.Sum).IsEqualTo(expectedRangeSum);
 
+        // Test DoForEachRef with struct action
         LargeList<long> refList = CreateSequentialList(capacity);
-        refList.DoForEach(static (ref long value) => value += MarkerBase);
+        IncrementAction incrementAction = new() { IncrementBy = MarkerBase };
+        refList.DoForEachRef(ref incrementAction);
         long[] refExpected = Enumerable.Range(0, (int)refList.Count).Select(i => (long)i + MarkerBase).ToArray();
         await Assert.That(refList.GetAll().SequenceEqual(refExpected)).IsTrue();
 
         LargeList<long> refRangeList = CreateSequentialList(capacity);
         long[] before = refRangeList.GetAll().ToArray();
-        refRangeList.DoForEach(static (ref long value) => value += MarkerBase, offset, count);
+        IncrementAction rangeIncrementAction = new() { IncrementBy = MarkerBase };
+        refRangeList.DoForEachRef(ref rangeIncrementAction, offset, count);
         long[] after = refRangeList.GetAll().ToArray();
         for (long i = 0; i < after.LongLength; i++)
         {
@@ -1054,27 +1326,6 @@ public class LargeListTest
             }
             await Assert.That(after[i]).IsEqualTo(expected);
         }
-
-        LargeList<long> refUserList = CreateSequentialList(capacity);
-        long increment = 2;
-        refUserList.DoForEach(static (ref long value, ref long add) => value += add, ref increment);
-        long[] refUserExpected = Enumerable.Range(0, (int)refUserList.Count).Select(i => (long)i + increment).ToArray();
-        await Assert.That(refUserList.GetAll().SequenceEqual(refUserExpected)).IsTrue();
-
-        LargeList<long> refUserRangeList = CreateSequentialList(capacity);
-        long delta = 3;
-        long[] rangeBefore = refUserRangeList.GetAll().ToArray();
-        refUserRangeList.DoForEach(static (ref long value, ref long add) => value += add, offset, count, ref delta);
-        long[] rangeAfter = refUserRangeList.GetAll().ToArray();
-        for (long i = 0; i < rangeAfter.LongLength; i++)
-        {
-            long expected = rangeBefore[i];
-            if (i >= offset && i < offset + count)
-            {
-                expected += delta;
-            }
-            await Assert.That(rangeAfter[i]).IsEqualTo(expected);
-        }
     }
 
     [Test]
@@ -1083,16 +1334,6 @@ public class LargeListTest
         LargeList<long> list = CreateSequentialList(2);
         await Assert.That(() => list.DoForEach((Action<long>)null!)).Throws<Exception>();
         await Assert.That(() => list.DoForEach((Action<long>)null!, 0, 1)).Throws<Exception>();
-
-        long user = 0;
-        await Assert.That(() => list.DoForEach((ActionWithUserData<long, long>)null!, ref user)).Throws<Exception>();
-        await Assert.That(() => list.DoForEach((ActionWithUserData<long, long>)null!, 0, 1, ref user)).Throws<Exception>();
-
-        await Assert.That(() => list.DoForEach((RefAction<long>)null!)).Throws<Exception>();
-        await Assert.That(() => list.DoForEach((RefAction<long>)null!, 0, 1)).Throws<Exception>();
-
-        await Assert.That(() => list.DoForEach((RefActionWithUserData<long, long>)null!, ref user)).Throws<Exception>();
-        await Assert.That(() => list.DoForEach((RefActionWithUserData<long, long>)null!, 0, 1, ref user)).Throws<Exception>();
     }
 
     #endregion

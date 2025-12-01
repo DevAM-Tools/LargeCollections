@@ -1,4 +1,4 @@
-﻿/*
+/*
 MIT License
 SPDX-License-Identifier: MIT
 
@@ -313,7 +313,8 @@ public class StreamExtensionsTest
         await Assert.That(() => stream.Read(target, -1L, 1L)).Throws<ArgumentException>();
         await Assert.That(() => stream.Read(target, 0L, -1L)).Throws<ArgumentException>();
         await Assert.That(() => stream.Read(target, 1L, target.Count)).Throws<ArgumentException>();
-        await Assert.That(() => stream.Read(target, target.Count)).Throws<IndexOutOfRangeException>();
+        // Read(target, target.Count) is now valid with optional parameters - it reads 0 bytes
+        await Assert.That(stream.Read(target, target.Count)).IsEqualTo(0L);
         await Assert.That(() => StreamExtensions.Read((Stream)null!, target, 0L, 1L)).Throws<ArgumentNullException>();
     }
 
@@ -473,45 +474,42 @@ public class StreamExtensionsTest
 
         public byte Get(long index) => _inner.Get(index);
 
-        public long BinarySearch(byte item, Func<byte, byte, int> comparer) => _inner.BinarySearch(item, comparer);
+        public long BinarySearch(byte item, long? offset = null, long? count = null)
+            => _inner.BinarySearch(item, offset, count);
 
-        public long BinarySearch(byte item, Func<byte, byte, int> comparer, long offset, long count) => _inner.BinarySearch(item, comparer, offset, count);
+        public long BinarySearch<TComparer>(byte item, TComparer comparer, long? offset = null, long? count = null) where TComparer : IComparer<byte>
+            => _inner.BinarySearch(item, comparer, offset, count);
+
+        public long IndexOf(byte item, long? offset = null, long? count = null) => _inner.IndexOf(item, offset, count);
+
+        public long IndexOf<TComparer>(byte item, ref TComparer comparer, long? offset = null, long? count = null) where TComparer : IEqualityComparer<byte>
+            => _inner.IndexOf(item, ref comparer, offset, count);
+
+        public long LastIndexOf(byte item, long? offset = null, long? count = null) => _inner.LastIndexOf(item, offset, count);
+
+        public long LastIndexOf<TComparer>(byte item, ref TComparer comparer, long? offset = null, long? count = null) where TComparer : IEqualityComparer<byte>
+            => _inner.LastIndexOf(item, ref comparer, offset, count);
+
+        public bool Contains(byte item) => _inner.Contains(item);
+
+        public bool Contains(byte item, long offset, long count) => _inner.Contains(item, offset, count);
+
+        public bool Contains<TComparer>(byte item, ref TComparer comparer, long? offset = null, long? count = null) where TComparer : IEqualityComparer<byte>
+            => _inner.Contains(item, ref comparer, offset, count);
 
         public IEnumerable<byte> GetAll() => _inner.GetAll();
 
         public IEnumerable<byte> GetAll(long offset, long count) => _inner.GetAll(offset, count);
 
-        public bool Contains(byte item) => _inner.Contains(item);
-
-        public bool Contains(byte item, Func<byte, byte, bool> equalsFunction) => _inner.Contains(item, equalsFunction);
-
-        public bool Contains(byte item, long offset, long count) => _inner.Contains(item, offset, count);
-
-        public bool Contains(byte item, long offset, long count, Func<byte, byte, bool> equalsFunction) => _inner.Contains(item, offset, count, equalsFunction);
-
-        public long IndexOf(byte item) => _inner.IndexOf(item);
-
-        public long IndexOf(byte item, Func<byte, byte, bool> equalsFunction) => _inner.IndexOf(item, equalsFunction);
-
-        public long IndexOf(byte item, long offset, long count) => _inner.IndexOf(item, offset, count);
-
-        public long IndexOf(byte item, long offset, long count, Func<byte, byte, bool> equalsFunction) => _inner.IndexOf(item, offset, count, equalsFunction);
-
-        public long LastIndexOf(byte item) => _inner.LastIndexOf(item);
-
-        public long LastIndexOf(byte item, Func<byte, byte, bool> equalsFunction) => _inner.LastIndexOf(item, equalsFunction);
-
-        public long LastIndexOf(byte item, long offset, long count) => _inner.LastIndexOf(item, offset, count);
-
-        public long LastIndexOf(byte item, long offset, long count, Func<byte, byte, bool> equalsFunction) => _inner.LastIndexOf(item, offset, count, equalsFunction);
-
         public void DoForEach(Action<byte> action) => _inner.DoForEach(action);
 
         public void DoForEach(Action<byte> action, long offset, long count) => _inner.DoForEach(action, offset, count);
 
-        public void DoForEach<TUserData>(ActionWithUserData<byte, TUserData> action, ref TUserData userData) => _inner.DoForEach(action, ref userData);
+        public void DoForEach<TAction>(ref TAction action) where TAction : ILargeAction<byte>
+            => _inner.DoForEach(ref action);
 
-        public void DoForEach<TUserData>(ActionWithUserData<byte, TUserData> action, long offset, long count, ref TUserData userData) => _inner.DoForEach(action, offset, count, ref userData);
+        public void DoForEach<TAction>(ref TAction action, long offset, long count) where TAction : ILargeAction<byte>
+            => _inner.DoForEach(ref action, offset, count);
 
         public void CopyTo(ILargeArray<byte> target, long sourceOffset, long targetOffset, long count) => _inner.CopyTo(target, sourceOffset, targetOffset, count);
 

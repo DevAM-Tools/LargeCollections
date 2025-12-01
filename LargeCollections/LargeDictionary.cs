@@ -1,4 +1,4 @@
-﻿/*
+/*
 MIT License
 SPDX-License-Identifier: MIT
 
@@ -32,46 +32,30 @@ using System.Runtime.CompilerServices;
 namespace LargeCollections;
 
 /// <summary>
-/// A mutable dictionary of <typeparamref name="TKey"/> as key and <typeparamref name="TValue"/> as value that can store up to <see cref="Constants.MaxLargeCollectionCount"/> elements.
-/// Dictionaries are hash based.
+/// A mutable dictionary of <typeparamref name="TKey"/> as key and <typeparamref name="TValue"/> as value 
+/// that can store up to <see cref="Constants.MaxLargeCollectionCount"/> elements.
+/// Dictionaries are hash based. This version uses a struct comparer type parameter for maximum JIT inlining performance.
 /// </summary>
+/// <typeparam name="TKey">The type of keys in the dictionary.</typeparam>
+/// <typeparam name="TValue">The type of values in the dictionary.</typeparam>
+/// <typeparam name="TComparer">The type of equality comparer for KeyValuePair. Use a struct implementing <see cref="IEqualityComparer{T}"/> for best performance.</typeparam>
 [DebuggerDisplay("LargeDictionary: Count = {Count}")]
-public class LargeDictionary<TKey, TValue> : ILargeDictionary<TKey, TValue> where TKey : notnull
+public class LargeDictionary<TKey, TValue, TComparer> : ILargeDictionary<TKey, TValue> 
+    where TKey : notnull
+    where TComparer : IEqualityComparer<KeyValuePair<TKey, TValue>>
 {
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static bool DefaultKeyEqualsFunction(TKey left, TKey right)
-    {
-        bool result = (left is null && right is null) || (left is not null && left.Equals(right));
-        return result;
-    }
-
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static int DefaultKeyHashCodeFunction(TKey key)
-    {
-        int result = key is null ? 0 : key.GetHashCode();
-        return result;
-    }
-
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static bool KeyValuePairEqualsFunction(KeyValuePair<TKey, TValue> left, KeyValuePair<TKey, TValue> right, Func<TKey, TKey, bool> keyEqualsFunction)
-    {
-        return keyEqualsFunction.Invoke(left.Key, right.Key);
-    }
-
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static int KeyValuePairHashCodeFunction(KeyValuePair<TKey, TValue> item, Func<TKey, int> keyHashCodeFunction)
-    {
-        return keyHashCodeFunction.Invoke(item.Key);
-    }
-
     private SetElement<KeyValuePair<TKey, TValue>>[][] _storage = null;
     private long _capacity = 0L;
-    private readonly Func<TKey, TKey, bool> _keyEqualsFunction;
-    private readonly Func<TKey, int> _keyHashCodeFunction;
+    private TComparer _comparer;
 
-    // Cached delegates to avoid allocations on every call
-    private readonly Func<KeyValuePair<TKey, TValue>, KeyValuePair<TKey, TValue>, bool> _kvpEqualsFunction;
-    private readonly Func<KeyValuePair<TKey, TValue>, int> _kvpHashCodeFunction;
+    /// <summary>
+    /// Gets the equality comparer used by this dictionary.
+    /// </summary>
+    public TComparer Comparer
+    {
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        get => _comparer;
+    }
 
     public long Count { get; private set; }
 
@@ -95,8 +79,18 @@ public class LargeDictionary<TKey, TValue> : ILargeDictionary<TKey, TValue> wher
         get => (double)Count / (double)Capacity;
     }
 
-    public LargeDictionary(Func<TKey, TKey, bool> keyEqualsFunction = null,
-        Func<TKey, int> hashCodeFunction = null,
+    /// <summary>
+    /// Creates a new LargeDictionary with the specified comparer.
+    /// </summary>
+    /// <param name="comparer">The equality comparer to use for KeyValuePairs. For best performance, use a struct type.</param>
+    /// <param name="capacity">Initial bucket capacity.</param>
+    /// <param name="capacityGrowFactor">Factor by which capacity grows when needed.</param>
+    /// <param name="fixedCapacityGrowAmount">Fixed amount to grow capacity by for small dictionaries.</param>
+    /// <param name="fixedCapacityGrowLimit">Capacity limit below which fixed growth is used.</param>
+    /// <param name="minLoadFactor">Minimum load factor before shrinking.</param>
+    /// <param name="maxLoadFactor">Maximum load factor before growing.</param>
+    /// <param name="minLoadFactorTolerance">Tolerance for minimum load factor.</param>
+    public LargeDictionary(TComparer comparer,
         long capacity = 1L,
         double capacityGrowFactor = Constants.DefaultCapacityGrowFactor,
         long fixedCapacityGrowAmount = Constants.DefaultFixedCapacityGrowAmount,
@@ -105,6 +99,10 @@ public class LargeDictionary<TKey, TValue> : ILargeDictionary<TKey, TValue> wher
         double maxLoadFactor = Constants.DefaultMaxLoadFactor,
         double minLoadFactorTolerance = Constants.DefaultMinLoadFactorTolerance)
     {
+        if (comparer is null)
+        {
+            throw new ArgumentNullException(nameof(comparer));
+        }
         if (capacity <= 0L || capacity > Constants.MaxLargeCollectionCount)
         {
             throw new ArgumentOutOfRangeException(nameof(capacity));
@@ -134,13 +132,7 @@ public class LargeDictionary<TKey, TValue> : ILargeDictionary<TKey, TValue> wher
             throw new ArgumentOutOfRangeException(nameof(minLoadFactorTolerance));
         }
 
-        _keyEqualsFunction = keyEqualsFunction ?? DefaultKeyEqualsFunction;
-        _keyHashCodeFunction = hashCodeFunction ?? DefaultKeyHashCodeFunction;
-
-        // Initialize cached delegates once to avoid allocations on every storage operation
-        _kvpEqualsFunction = (left, right) => KeyValuePairEqualsFunction(left, right, _keyEqualsFunction);
-        _kvpHashCodeFunction = (kvp) => KeyValuePairHashCodeFunction(kvp, _keyHashCodeFunction);
-
+        _comparer = comparer;
         _storage = StorageExtensions.StorageCreate<SetElement<KeyValuePair<TKey, TValue>>>(capacity);
         _capacity = capacity;
 
@@ -161,11 +153,9 @@ public class LargeDictionary<TKey, TValue> : ILargeDictionary<TKey, TValue> wher
         get
         {
             long capacity = Capacity;
-
             for (long i = 0L; i < capacity; i++)
             {
                 SetElement<KeyValuePair<TKey, TValue>> element = _storage.StorageGet(i);
-
                 while (element is not null)
                 {
                     yield return element.Item.Key;
@@ -181,11 +171,9 @@ public class LargeDictionary<TKey, TValue> : ILargeDictionary<TKey, TValue> wher
         get
         {
             long capacity = Capacity;
-
             for (long i = 0L; i < capacity; i++)
             {
                 SetElement<KeyValuePair<TKey, TValue>> element = _storage.StorageGet(i);
-
                 while (element is not null)
                 {
                     yield return element.Item.Value;
@@ -210,7 +198,6 @@ public class LargeDictionary<TKey, TValue> : ILargeDictionary<TKey, TValue> wher
             {
                 throw new ArgumentNullException(nameof(key));
             }
-
             return Get(key);
         }
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -220,7 +207,6 @@ public class LargeDictionary<TKey, TValue> : ILargeDictionary<TKey, TValue> wher
             {
                 throw new ArgumentNullException(nameof(key));
             }
-
             Set(key, value);
         }
     }
@@ -232,7 +218,6 @@ public class LargeDictionary<TKey, TValue> : ILargeDictionary<TKey, TValue> wher
         {
             throw new ArgumentNullException(nameof(key));
         }
-
         Add(new KeyValuePair<TKey, TValue>(key, value));
     }
 
@@ -246,22 +231,15 @@ public class LargeDictionary<TKey, TValue> : ILargeDictionary<TKey, TValue> wher
 
         long count = Count;
         long previousCount = count;
-        KeyValuePair<TKey, TValue> itemCopy = item;
-        LargeSetHelpers.AddToStorage(
-            ref itemCopy,
-            _storage,
-            _capacity,
-            ref count,
-            _kvpEqualsFunction,
-            _kvpHashCodeFunction);
-        
+
+        LargeSetHelpers.AddToStorage(ref item, _storage, _capacity, ref count, ref _comparer);
+
         if (count > previousCount && count > Constants.MaxLargeCollectionCount)
         {
             throw new InvalidOperationException($"Can not store more than {Constants.MaxLargeCollectionCount} items.");
         }
-        
-        Count = count;
 
+        Count = count;
         Extend();
     }
 
@@ -296,15 +274,9 @@ public class LargeDictionary<TKey, TValue> : ILargeDictionary<TKey, TValue> wher
         {
             throw new ArgumentNullException(nameof(items));
         }
-
         AddRange(items, 0L, items.Count);
     }
 
-    /// <summary>
-    /// Adds a range of items from a large array to the dictionary.
-    /// </summary>
-    /// <param name="items">The large array of items to add.</param>
-    /// <param name="offset">The zero-based index in the large array at which to begin adding items.</param>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void AddRange(IReadOnlyLargeArray<KeyValuePair<TKey, TValue>> items, long offset)
     {
@@ -312,16 +284,9 @@ public class LargeDictionary<TKey, TValue> : ILargeDictionary<TKey, TValue> wher
         {
             throw new ArgumentNullException(nameof(items));
         }
-
         AddRange(items, offset, items.Count - offset);
     }
 
-    /// <summary>
-    /// Adds a range of items from a large array to the dictionary.
-    /// </summary>
-    /// <param name="items">The large array of items to add.</param>
-    /// <param name="offset">The zero-based index in the large array at which to begin adding items.</param>
-    /// <param name="count">The number of items to add from the large array.</param>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void AddRange(IReadOnlyLargeArray<KeyValuePair<TKey, TValue>> items, long offset, long count)
     {
@@ -373,14 +338,7 @@ public class LargeDictionary<TKey, TValue> : ILargeDictionary<TKey, TValue> wher
         KeyValuePair<TKey, TValue> keyItem = new(key, default);
 
         long count = Count;
-        bool result = LargeSetHelpers.RemoveFromStorage(
-            keyItem,
-            _storage,
-            ref count,
-            Capacity,
-            _kvpEqualsFunction,
-            _kvpHashCodeFunction,
-            out KeyValuePair<TKey, TValue> removedItem);
+        bool result = LargeSetHelpers.RemoveFromStorage(ref keyItem, _storage, Capacity, ref count, ref _comparer, out KeyValuePair<TKey, TValue> removedItem);
         Count = count;
 
         if (result)
@@ -399,7 +357,6 @@ public class LargeDictionary<TKey, TValue> : ILargeDictionary<TKey, TValue> wher
         {
             throw new ArgumentNullException(nameof(item), "Key cannot be null");
         }
-
         return Remove(item.Key, out _);
     }
 
@@ -438,13 +395,7 @@ public class LargeDictionary<TKey, TValue> : ILargeDictionary<TKey, TValue> wher
         }
 
         KeyValuePair<TKey, TValue> keyItem = new(key, default);
-        if (!LargeSetHelpers.TryGetValueFromStorage(
-            keyItem,
-            _storage,
-            Capacity,
-            _kvpEqualsFunction,
-            _kvpHashCodeFunction,
-            out KeyValuePair<TKey, TValue> value))
+        if (!LargeSetHelpers.TryGetValueFromStorage(ref keyItem, _storage, Capacity, ref _comparer, out KeyValuePair<TKey, TValue> value))
         {
             throw new KeyNotFoundException();
         }
@@ -461,12 +412,7 @@ public class LargeDictionary<TKey, TValue> : ILargeDictionary<TKey, TValue> wher
         }
 
         KeyValuePair<TKey, TValue> keyItem = new(key, default);
-        return LargeSetHelpers.ContainsInStorage(
-            keyItem,
-            _storage,
-            Capacity,
-            _kvpEqualsFunction,
-            _kvpHashCodeFunction);
+        return LargeSetHelpers.ContainsInStorage(ref keyItem, _storage, Capacity, ref _comparer);
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -476,7 +422,6 @@ public class LargeDictionary<TKey, TValue> : ILargeDictionary<TKey, TValue> wher
         {
             throw new ArgumentNullException(nameof(item), "Key cannot be null");
         }
-
         return TryGetValue(item.Key, out TValue value) && EqualityComparer<TValue>.Default.Equals(value, item.Value);
     }
 
@@ -489,13 +434,7 @@ public class LargeDictionary<TKey, TValue> : ILargeDictionary<TKey, TValue> wher
         }
 
         KeyValuePair<TKey, TValue> keyItem = new(key, default);
-        if (!LargeSetHelpers.TryGetValueFromStorage(
-            keyItem,
-            _storage,
-            Capacity,
-            _kvpEqualsFunction,
-            _kvpHashCodeFunction,
-            out KeyValuePair<TKey, TValue> keyAndValue))
+        if (!LargeSetHelpers.TryGetValueFromStorage(ref keyItem, _storage, Capacity, ref _comparer, out KeyValuePair<TKey, TValue> keyAndValue))
         {
             value = default;
             return false;
@@ -516,29 +455,18 @@ public class LargeDictionary<TKey, TValue> : ILargeDictionary<TKey, TValue> wher
         KeyValuePair<TKey, TValue> keyItem = new(key, default);
         KeyValuePair<TKey, TValue> valueItem = new(key, default);
         long count = Count;
-        long previousCount = count;
-        bool found = LargeSetHelpers.TryGetOrAddToStorage(
-            ref keyItem,
-            ref valueItem,
-            _storage,
-            _capacity,
-            ref count,
-            _kvpEqualsFunction,
-            _kvpHashCodeFunction,
-            out KeyValuePair<TKey, TValue> kvp);
-        
+        bool found = LargeSetHelpers.TryGetOrAddToStorage(ref keyItem, ref valueItem, _storage, _capacity, ref count, ref _comparer, out KeyValuePair<TKey, TValue> kvp);
+
         if (!found && count > Constants.MaxLargeCollectionCount)
         {
             throw new InvalidOperationException($"Can not store more than {Constants.MaxLargeCollectionCount} items.");
         }
-        
-        Count = count;
 
+        Count = count;
         value = kvp.Value;
 
         if (!found)
         {
-            // Item was added, check if we need to extend
             Extend();
         }
 
@@ -556,29 +484,18 @@ public class LargeDictionary<TKey, TValue> : ILargeDictionary<TKey, TValue> wher
         KeyValuePair<TKey, TValue> searchItem = new(key, default);
         KeyValuePair<TKey, TValue> valueItem = new(key, valueIfNotFound);
         long count = Count;
-        long previousCount = count;
-        bool found = LargeSetHelpers.TryGetOrAddToStorage(
-            ref searchItem,
-            ref valueItem,
-            _storage,
-            _capacity,
-            ref count,
-            _kvpEqualsFunction,
-            _kvpHashCodeFunction,
-            out KeyValuePair<TKey, TValue> kvp);
-        
+        bool found = LargeSetHelpers.TryGetOrAddToStorage(ref searchItem, ref valueItem, _storage, _capacity, ref count, ref _comparer, out KeyValuePair<TKey, TValue> kvp);
+
         if (!found && count > Constants.MaxLargeCollectionCount)
         {
             throw new InvalidOperationException($"Can not store more than {Constants.MaxLargeCollectionCount} items.");
         }
-        
-        Count = count;
 
+        Count = count;
         value = kvp.Value;
 
         if (!found)
         {
-            // Item was added, check if we need to extend
             Extend();
         }
 
@@ -592,7 +509,6 @@ public class LargeDictionary<TKey, TValue> : ILargeDictionary<TKey, TValue> wher
         {
             throw new ArgumentNullException(nameof(key));
         }
-
         if (valueFactory is null)
         {
             throw new ArgumentNullException(nameof(valueFactory));
@@ -600,29 +516,18 @@ public class LargeDictionary<TKey, TValue> : ILargeDictionary<TKey, TValue> wher
 
         KeyValuePair<TKey, TValue> searchItem = new(key, default);
         long count = Count;
-        long previousCount = count;
-        bool found = LargeSetHelpers.TryGetOrAddToStorageWithFactory(
-            searchItem,
-            () => new KeyValuePair<TKey, TValue>(key, valueFactory.Invoke()),
-            _storage,
-            _capacity,
-            ref count,
-            _kvpEqualsFunction,
-            _kvpHashCodeFunction,
-            out KeyValuePair<TKey, TValue> kvp);
-        
+        bool found = LargeSetHelpers.TryGetOrAddToStorageWithFactory(ref searchItem, () => new KeyValuePair<TKey, TValue>(key, valueFactory.Invoke()), _storage, _capacity, ref count, ref _comparer, out KeyValuePair<TKey, TValue> kvp);
+
         if (!found && count > Constants.MaxLargeCollectionCount)
         {
             throw new InvalidOperationException($"Can not store more than {Constants.MaxLargeCollectionCount} items.");
         }
-        
-        Count = count;
 
+        Count = count;
         value = kvp.Value;
 
         if (!found)
         {
-            // Item was added, check if we need to extend
             Extend();
         }
 
@@ -652,16 +557,7 @@ public class LargeDictionary<TKey, TValue> : ILargeDictionary<TKey, TValue> wher
     {
         long count = Count;
         long capacity = _capacity;
-        LargeSetHelpers.ExtendStorage(
-            ref _storage,
-            ref capacity,
-            ref count,
-            CapacityGrowFactor,
-            FixedCapacityGrowAmount,
-            FixedCapacityGrowLimit,
-            MaxLoadFactor,
-            _kvpEqualsFunction,
-            _kvpHashCodeFunction);
+        LargeSetHelpers.ExtendStorage(ref _storage, ref capacity, ref count, CapacityGrowFactor, FixedCapacityGrowAmount, FixedCapacityGrowLimit, MaxLoadFactor, ref _comparer);
         _capacity = capacity;
         Count = count;
     }
@@ -671,27 +567,33 @@ public class LargeDictionary<TKey, TValue> : ILargeDictionary<TKey, TValue> wher
     {
         long count = Count;
         long capacity = _capacity;
-        LargeSetHelpers.ShrinkStorage(
-            ref _storage,
-            ref capacity,
-            ref count,
-            MinLoadFactor,
-            MinLoadFactorTolerance,
-            _kvpEqualsFunction,
-            _kvpHashCodeFunction);
+        LargeSetHelpers.ShrinkStorage(ref _storage, ref capacity, ref count, MinLoadFactor, MinLoadFactorTolerance, ref _comparer);
         _capacity = capacity;
         Count = count;
     }
 
+    #region DoForEach Methods
+
+    /// <summary>
+    /// Performs the <paramref name="action"/> with key-value pairs of the dictionary.
+    /// </summary>
+    /// <param name="action">The function that will be called for each key-value pair.</param>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void DoForEach(Action<KeyValuePair<TKey, TValue>> action)
     {
         LargeSetHelpers.DoForEachInStorage(_storage, _capacity, action);
     }
 
+    /// <summary>
+    /// Performs the action on key-value pairs using an action for optimal performance.
+    /// </summary>
+    /// <typeparam name="TAction">A type implementing <see cref="ILargeAction{KeyValuePair{TKey, TValue}}"/>.</typeparam>
+    /// <param name="action">The action instance passed by reference.</param>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public void DoForEach<TUserData>(ActionWithUserData<KeyValuePair<TKey, TValue>, TUserData> action, ref TUserData userData)
+    public void DoForEach<TAction>(ref TAction action) where TAction : ILargeAction<KeyValuePair<TKey, TValue>>
     {
-        LargeSetHelpers.DoForEachInStorage(_storage, _capacity, action, ref userData);
+        LargeSetHelpers.DoForEachInStorage(_storage, _capacity, ref action);
     }
+
+    #endregion
 }

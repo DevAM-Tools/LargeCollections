@@ -284,7 +284,8 @@ public class LargeSpanTest
         LargeArray<long> inner = CreateSequentialArray(capacity);
         LargeSpan<long> span = new(inner);
 
-        span.DoForEach(static (ref long item) => item++);
+        IncrementRefAction incrementAction = new () { IncrementBy = 1 };
+        span.DoForEachRef(ref incrementAction);
 
         if (span.Count > 0)
         {
@@ -293,18 +294,19 @@ public class LargeSpanTest
 
         long offset = Math.Min(1L, Math.Max(0L, span.Count - 1L));
         long length = span.Count - offset;
-        span.DoForEach(static (ref long item) => item += 2L, offset, length);
+        IncrementRefAction addTwoAction = new () { IncrementBy = 2 };
+        span.DoForEachRef(ref addTwoAction, offset, length);
 
-        long userData = 0L;
-        span.DoForEach(static (ref long item, ref long sum) => sum += item, ref userData);
-        await Assert.That(userData).IsEqualTo(inner.GetAll().Sum());
+        SumRefAction sumRefAction = new ();
+        span.DoForEachRef(ref sumRefAction);
+        await Assert.That(sumRefAction.Sum).IsEqualTo(inner.GetAll().Sum());
 
-        long rangeSum = 0L;
-        span.DoForEach(static (ref long item, ref long sum) => sum += item, offset, length, ref rangeSum);
-        await Assert.That(rangeSum).IsEqualTo(inner.GetAll(offset, length).Sum());
+        SumRefAction rangeSumRefAction = new ();
+        span.DoForEachRef(ref rangeSumRefAction, offset, length);
+        await Assert.That(rangeSumRefAction.Sum).IsEqualTo(inner.GetAll(offset, length).Sum());
 
-        await Assert.That(() => span.DoForEach(static (ref long _) => { }, -1L, 1L)).Throws<Exception>();
-        await Assert.That(() => span.DoForEach(static (ref long _, ref long __) => { }, -1L, 1L, ref userData)).Throws<Exception>();
+        IncrementRefAction noopAction = new ();
+        await Assert.That(() => span.DoForEachRef(ref noopAction, -1L, 1L)).Throws<Exception>();
     }
 
     [Test]
@@ -324,16 +326,15 @@ public class LargeSpanTest
         span.DoForEach(item => rangeSum += item, offset, length);
         await Assert.That(rangeSum).IsEqualTo(inner.GetAll(offset, length).Sum());
 
-        long userData = 0L;
-        span.DoForEach(static (long item, ref long acc) => acc += item, ref userData);
-        await Assert.That(userData).IsEqualTo(inner.GetAll().Sum());
+        SumAction sumAction = new ();
+        span.DoForEach(ref sumAction);
+        await Assert.That(sumAction.Sum).IsEqualTo(inner.GetAll().Sum());
 
-        long rangeUserData = 0L;
-        span.DoForEach(static (long item, ref long acc) => acc += item, offset, length, ref rangeUserData);
-        await Assert.That(rangeUserData).IsEqualTo(inner.GetAll(offset, length).Sum());
+        SumAction rangeSumAction = new ();
+        span.DoForEach(ref rangeSumAction, offset, length);
+        await Assert.That(rangeSumAction.Sum).IsEqualTo(inner.GetAll(offset, length).Sum());
 
         await Assert.That(() => span.DoForEach(_ => { }, -1L, 1L)).Throws<Exception>();
-        await Assert.That(() => span.DoForEach(static (long _, ref long __) => { }, -1L, 1L, ref userData)).Throws<Exception>();
     }
 
     [Test]
@@ -348,14 +349,14 @@ public class LargeSpanTest
             inner[i] = span.Count - i;
         }
 
-        span.Sort(null);
+        span.Sort(new DefaultComparer<long>());
         await Assert.That(span.GetAll().SequenceEqual(span.GetAll().OrderBy(x => x))).IsTrue();
 
         if (span.Count > 1)
         {
             long offset = 0L;
             long length = Math.Min(5L, span.Count);
-            span.Sort(static (a, b) => b.CompareTo(a), offset, length);
+            span.Sort(new DescendingComparer<long>(), offset, length);
             List<long> range = span.GetAll(offset, length).ToList();
             await Assert.That(range.SequenceEqual(range.OrderByDescending(x => x))).IsTrue();
 
@@ -368,7 +369,8 @@ public class LargeSpanTest
             await Assert.That(span[rightIndex]).IsEqualTo(leftValue);
         }
 
-        await Assert.That(() => span.Sort(null, -1L, 1L)).Throws<Exception>();
+        DefaultComparer<long> comparer = new();
+        await Assert.That(() => span.Sort(comparer, -1L, 1L)).Throws<Exception>();
         await Assert.That(() => span.Swap(-1L, 0L)).Throws<Exception>();
         await Assert.That(() => span.Swap(0L, span.Count)).Throws<Exception>();
     }
@@ -402,15 +404,17 @@ public class LargeSpanTest
         long start = Math.Max(0L, inner.Count - segmentLength);
         LargeSpan<long> span = segmentLength > 0L ? new(inner, start, segmentLength) : new(inner);
 
-        Func<long, long, int> comparer = static (a, b) => a.CompareTo(b);
+        DefaultComparer<long> comparer = new();
 
         if (span.Count > 0)
         {
             long targetValue = inner[start];
-            await Assert.That(span.BinarySearch(targetValue, comparer)).IsEqualTo(start);
-            await Assert.That(span.BinarySearch(targetValue, comparer, 0L, span.Count)).IsEqualTo(start);
+            // BinarySearch returns span-relative index, so first element is at index 0
+            await Assert.That(span.BinarySearch(targetValue, comparer)).IsEqualTo(0L);
+            await Assert.That(span.BinarySearch(targetValue, comparer, 0L, span.Count)).IsEqualTo(0L);
 
-            long expectedNext = span.Count > 1 ? start + 1L : -1L;
+            // Second element (if exists) should be at span-relative index 1
+            long expectedNext = span.Count > 1 ? 1L : -1L;
             await Assert.That(span.BinarySearch(targetValue + 1L, comparer)).IsEqualTo(expectedNext);
         }
         else
@@ -434,20 +438,27 @@ public class LargeSpanTest
         if (span.Count > 0)
         {
             await Assert.That(span.Contains(searchValue)).IsTrue();
-            await Assert.That(span.IndexOf(searchValue)).IsEqualTo(span.Start);
-            await Assert.That(span.LastIndexOf(searchValue)).IsEqualTo(span.Start);
-            await Assert.That(span.Contains(searchValue, static (a, b) => a == b)).IsTrue();
-            await Assert.That(span.IndexOf(searchValue, static (a, b) => a == b)).IsEqualTo(span.Start);
-            await Assert.That(span.LastIndexOf(searchValue, static (a, b) => a == b)).IsEqualTo(span.Start);
+            // IndexOf and LastIndexOf return span-relative indices
+            await Assert.That(span.IndexOf(searchValue)).IsEqualTo(0L);
+            await Assert.That(span.LastIndexOf(searchValue)).IsEqualTo(0L);
+            DefaultEqualityComparer<long> eq1 = new();
+            await Assert.That(span.Contains(searchValue, ref eq1)).IsTrue();
+            DefaultEqualityComparer<long> eq2 = new();
+            await Assert.That(span.IndexOf(searchValue, ref eq2)).IsEqualTo(0L);
+            DefaultEqualityComparer<long> eq3 = new();
+            await Assert.That(span.LastIndexOf(searchValue, ref eq3)).IsEqualTo(0L);
 
             long offset = Math.Min(1L, Math.Max(0L, span.Count - 1L));
             long length = span.Count - offset;
             await Assert.That(span.Contains(searchValue, offset, length)).IsEqualTo(offset == 0L);
-            await Assert.That(span.Contains(searchValue, offset, length, static (a, b) => a == b)).IsEqualTo(offset == 0L);
-            await Assert.That(span.IndexOf(searchValue, offset, length)).IsEqualTo(offset == 0L ? span.Start : -1L);
-            await Assert.That(span.IndexOf(searchValue, offset, length, static (a, b) => a == b)).IsEqualTo(offset == 0L ? span.Start : -1L);
-            await Assert.That(span.LastIndexOf(searchValue, offset, length)).IsEqualTo(offset == 0L ? span.Start : -1L);
-            await Assert.That(span.LastIndexOf(searchValue, offset, length, static (a, b) => a == b)).IsEqualTo(offset == 0L ? span.Start : -1L);
+            DefaultEqualityComparer<long> eq4 = new();
+            await Assert.That(span.Contains(searchValue, ref eq4, offset, length)).IsEqualTo(offset == 0L);
+            await Assert.That(span.IndexOf(searchValue, offset, length)).IsEqualTo(offset == 0L ? 0L : -1L);
+            DefaultEqualityComparer<long> eq5 = new();
+            await Assert.That(span.IndexOf(searchValue, ref eq5, offset, length)).IsEqualTo(offset == 0L ? 0L : -1L);
+            await Assert.That(span.LastIndexOf(searchValue, offset, length)).IsEqualTo(offset == 0L ? 0L : -1L);
+            DefaultEqualityComparer<long> eq6 = new();
+            await Assert.That(span.LastIndexOf(searchValue, ref eq6, offset, length)).IsEqualTo(offset == 0L ? 0L : -1L);
         }
         else
         {
@@ -461,7 +472,8 @@ public class LargeSpanTest
         await Assert.That(span.LastIndexOf(-12345L)).IsEqualTo(-1L);
 
         await Assert.That(() => span.Contains(0L, -1L, 1L)).Throws<Exception>();
-        await Assert.That(() => span.Contains(0L, -1L, 1L, static (a, b) => a == b)).Throws<Exception>();
+        DefaultEqualityComparer<long> eq7 = new();
+        await Assert.That(() => span.Contains(0L, ref eq7, -1L, 1L)).Throws<Exception>();
         await Assert.That(() => span.IndexOf(0L, -1L, 1L)).Throws<Exception>();
         await Assert.That(() => span.LastIndexOf(0L, -1L, 1L)).Throws<Exception>();
     }
@@ -793,16 +805,15 @@ public class LargeSpanTest
         span.DoForEach(value => rangeSum += value, offset, length);
         await Assert.That(rangeSum).IsEqualTo(inner.GetAll(offset, length).Sum());
 
-        long userData = 0L;
-        span.DoForEach(static (long value, ref long acc) => acc += value, ref userData);
-        await Assert.That(userData).IsEqualTo(inner.GetAll().Sum());
+        SumAction sumAction = new ();
+        span.DoForEach(ref sumAction);
+        await Assert.That(sumAction.Sum).IsEqualTo(inner.GetAll().Sum());
 
-        long rangeUserData = 0L;
-        span.DoForEach(static (long value, ref long acc) => acc += value, offset, length, ref rangeUserData);
-        await Assert.That(rangeUserData).IsEqualTo(inner.GetAll(offset, length).Sum());
+        SumAction rangeSumAction = new ();
+        span.DoForEach(ref rangeSumAction, offset, length);
+        await Assert.That(rangeSumAction.Sum).IsEqualTo(inner.GetAll(offset, length).Sum());
 
         await Assert.That(() => span.DoForEach(_ => { }, -1L, 1L)).Throws<Exception>();
-        await Assert.That(() => span.DoForEach(static (long _, ref long __) => { }, -1L, 1L, ref userData)).Throws<Exception>();
     }
 
     [Test]
@@ -811,14 +822,15 @@ public class LargeSpanTest
     {
         LargeArray<long> inner = CreateSequentialArray(capacity);
         ReadOnlyLargeSpan<long> span = new(inner);
-        Func<long, long, int> comparer = static (a, b) => a.CompareTo(b);
+        DefaultComparer<long> comparer = new();
 
         if (span.Count > 0)
         {
             long value = span[0];
             await Assert.That(span.BinarySearch(value, comparer)).IsEqualTo(span.Start);
             await Assert.That(span.Contains(value)).IsTrue();
-            await Assert.That(span.Contains(value, static (a, b) => a == b)).IsTrue();
+            DefaultEqualityComparer<long> eq1 = new();
+            await Assert.That(span.Contains(value, ref eq1)).IsTrue();
             await Assert.That(span.IndexOf(value)).IsEqualTo(span.Start);
             await Assert.That(span.LastIndexOf(value)).IsEqualTo(span.Start);
         }
@@ -830,7 +842,8 @@ public class LargeSpanTest
 
         await Assert.That(() => span.BinarySearch(0L, comparer, -1L, 1L)).Throws<Exception>();
         await Assert.That(() => span.Contains(0L, -1L, 1L)).Throws<Exception>();
-        await Assert.That(() => span.Contains(0L, -1L, 1L, static (a, b) => a == b)).Throws<Exception>();
+        DefaultEqualityComparer<long> eq2 = new();
+        await Assert.That(() => span.Contains(0L, ref eq2, -1L, 1L)).Throws<Exception>();
         await Assert.That(() => span.IndexOf(0L, -1L, 1L)).Throws<Exception>();
         await Assert.That(() => span.LastIndexOf(0L, -1L, 1L)).Throws<Exception>();
     }
@@ -841,7 +854,7 @@ public class LargeSpanTest
     {
         LargeArray<long> inner = CreateSequentialArray(capacity);
         ReadOnlyLargeSpan<long> span = new(inner);
-        Func<long, long, int> comparer = static (a, b) => a.CompareTo(b);
+        DefaultComparer<long> comparer = new();
 
         if (span.Count == 0)
         {
@@ -866,20 +879,23 @@ public class LargeSpanTest
         if (span.Count == 0)
         {
             await Assert.That(span.Contains(0L, 0L, 0L)).IsFalse();
-            await Assert.That(span.Contains(0L, 0L, 0L, static (a, b) => a == b)).IsFalse();
+            DefaultEqualityComparer<long> eq1 = new();
+            await Assert.That(span.Contains(0L, ref eq1, 0L, 0L)).IsFalse();
             return;
         }
 
         long value = span[0];
         await Assert.That(span.Contains(value, 0L, span.Count)).IsTrue();
-        await Assert.That(span.Contains(value, 0L, span.Count, static (a, b) => a == b)).IsTrue();
+        DefaultEqualityComparer<long> eq2 = new();
+        await Assert.That(span.Contains(value, ref eq2, 0L, span.Count)).IsTrue();
 
         if (span.Count > 1)
         {
             long offset = 1L;
             long length = span.Count - offset;
             await Assert.That(span.Contains(value, offset, length)).IsFalse();
-            await Assert.That(span.Contains(value, offset, length, static (a, b) => a == b)).IsFalse();
+            DefaultEqualityComparer<long> eq3 = new();
+            await Assert.That(span.Contains(value, ref eq3, offset, length)).IsFalse();
         }
     }
 
@@ -894,23 +910,31 @@ public class LargeSpanTest
 
         if (span.Count > 0)
         {
-            await Assert.That(span.IndexOf(target, static (a, b) => a == b)).IsEqualTo(span.Start);
-            await Assert.That(span.LastIndexOf(target, static (a, b) => a == b)).IsEqualTo(span.Start);
-            await Assert.That(span.IndexOf(target, 0L, span.Count, static (a, b) => a == b)).IsEqualTo(span.Start);
-            await Assert.That(span.LastIndexOf(target, 0L, span.Count, static (a, b) => a == b)).IsEqualTo(span.Start);
+            DefaultEqualityComparer<long> eq1 = new();
+            await Assert.That(span.IndexOf(target, ref eq1)).IsEqualTo(span.Start);
+            DefaultEqualityComparer<long> eq2 = new();
+            await Assert.That(span.LastIndexOf(target, ref eq2)).IsEqualTo(span.Start);
+            DefaultEqualityComparer<long> eq3 = new();
+            await Assert.That(span.IndexOf(target, ref eq3, 0L, span.Count)).IsEqualTo(span.Start);
+            DefaultEqualityComparer<long> eq4 = new();
+            await Assert.That(span.LastIndexOf(target, ref eq4, 0L, span.Count)).IsEqualTo(span.Start);
 
             if (span.Count > 1)
             {
                 long offset = 1L;
                 long length = span.Count - offset;
-                await Assert.That(span.IndexOf(target, offset, length, static (a, b) => a == b)).IsEqualTo(-1L);
-                await Assert.That(span.LastIndexOf(target, offset, length, static (a, b) => a == b)).IsEqualTo(-1L);
+                DefaultEqualityComparer<long> eq5 = new();
+                await Assert.That(span.IndexOf(target, ref eq5, offset, length)).IsEqualTo(-1L);
+                DefaultEqualityComparer<long> eq6 = new();
+                await Assert.That(span.LastIndexOf(target, ref eq6, offset, length)).IsEqualTo(-1L);
             }
         }
         else
         {
-            await Assert.That(span.IndexOf(target, static (a, b) => a == b)).IsEqualTo(-1L);
-            await Assert.That(span.LastIndexOf(target, static (a, b) => a == b)).IsEqualTo(-1L);
+            DefaultEqualityComparer<long> eq7 = new();
+            await Assert.That(span.IndexOf(target, ref eq7)).IsEqualTo(-1L);
+            DefaultEqualityComparer<long> eq8 = new();
+            await Assert.That(span.LastIndexOf(target, ref eq8)).IsEqualTo(-1L);
         }
     }
 
@@ -1023,6 +1047,102 @@ public class LargeSpanTest
         {
             await Assert.That(target[targetOffset + i]).IsEqualTo(source[sourceOffset + i]);
         }
+    }
+
+    #endregion
+
+    #region Edge Cases - Self/Overlapping Copy
+
+    [Test]
+    public async Task CopyFrom_SameArray_NonOverlapping_Works()
+    {
+        // Copy from end of array to beginning (no overlap)
+        LargeArray<long> array = new(10);
+        for (long i = 0; i < 10; i++) array[i] = i * 10;
+
+        LargeSpan<long> span = new(array);
+        ReadOnlyLargeSpan<long> sourceSpan = new(array, 5, 5); // [50,60,70,80,90]
+
+        span.CopyFrom(sourceSpan, 0, 5);
+
+        // First 5 elements should now be [50,60,70,80,90]
+        await Assert.That(array[0]).IsEqualTo(50L);
+        await Assert.That(array[1]).IsEqualTo(60L);
+        await Assert.That(array[2]).IsEqualTo(70L);
+        await Assert.That(array[3]).IsEqualTo(80L);
+        await Assert.That(array[4]).IsEqualTo(90L);
+    }
+
+    [Test]
+    public async Task Slice_CreateMultipleSlices_IndependentViews()
+    {
+        LargeArray<long> array = new(10);
+        for (long i = 0; i < 10; i++) array[i] = i;
+
+        LargeSpan<long> fullSpan = new(array);
+        LargeSpan<long> firstHalf = fullSpan.Slice(0, 5);
+        LargeSpan<long> secondHalf = fullSpan.Slice(5, 5);
+
+        // Modify through different slices
+        firstHalf[0] = 100;
+        secondHalf[0] = 200;
+
+        await Assert.That(array[0]).IsEqualTo(100L);
+        await Assert.That(array[5]).IsEqualTo(200L);
+        await Assert.That(fullSpan[0]).IsEqualTo(100L);
+        await Assert.That(fullSpan[5]).IsEqualTo(200L);
+    }
+
+    [Test]
+    public async Task Slice_ChainedSlicing_CorrectBounds()
+    {
+        LargeArray<long> array = new(20);
+        for (long i = 0; i < 20; i++) array[i] = i;
+
+        LargeSpan<long> span1 = new(array, 5, 10); // [5..14]
+        LargeSpan<long> span2 = span1.Slice(2, 5);  // [7..11] relative to span1
+
+        await Assert.That(span2.Start).IsEqualTo(7L);
+        await Assert.That(span2.Count).IsEqualTo(5L);
+        await Assert.That(span2[0]).IsEqualTo(7L);
+        await Assert.That(span2[4]).IsEqualTo(11L);
+    }
+
+    [Test]
+    public async Task EmptySpan_Operations_Work()
+    {
+        LargeArray<long> array = new(10);
+        LargeSpan<long> emptySpan = new(array, 5, 0);
+
+        await Assert.That(emptySpan.Count).IsEqualTo(0L);
+        await Assert.That(emptySpan.Start).IsEqualTo(5L);
+        await Assert.That(emptySpan.GetAll().Any()).IsFalse();
+
+        // Operations on empty span should not throw
+        emptySpan.CopyFrom((ReadOnlyLargeSpan<long>)default, 0L, 0L);
+        emptySpan.CopyTo(default(LargeSpan<long>), 0L, 0L);
+    }
+
+    #endregion
+
+    #region Helper Structs
+
+    private struct IncrementRefAction : ILargeRefAction<long>
+    {
+        public long IncrementBy;
+        public void Invoke(ref long item) => item += IncrementBy;
+    }
+
+    private struct SumRefAction : ILargeRefAction<long>
+    {
+        public long Sum;
+        public void Invoke(ref long item) => Sum += item;
+    }
+
+    private struct SumAction : ILargeAction<long>
+    {
+        public long Sum;
+        public void Invoke(long item) => Sum += item;
     }
 
     #endregion

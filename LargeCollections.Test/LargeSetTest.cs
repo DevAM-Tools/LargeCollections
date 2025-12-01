@@ -1,4 +1,4 @@
-﻿/*
+/*
 MIT License
 SPDX-License-Identifier: MIT
 
@@ -46,11 +46,11 @@ public class LargeSetTest
     {
         if (capacity <= 0 || capacity > Constants.MaxLargeCollectionCount)
         {
-            await Assert.That(() => new LargeSet<long>(capacity: capacity)).Throws<Exception>();
+            await Assert.That(() => LargeSet.Create<long>(capacity: capacity)).Throws<Exception>();
             return;
         }
 
-        LargeSet<long> set = new(capacity: capacity);
+        var set = LargeSet.Create<long>(capacity: capacity);
 
         await Assert.That(set.Count).IsEqualTo(0L);
         await Assert.That(set.Capacity).IsEqualTo(capacity);
@@ -60,25 +60,24 @@ public class LargeSetTest
         await Assert.That(set.MinLoadFactor).IsEqualTo(Constants.DefaultMinLoadFactor);
         await Assert.That(set.MaxLoadFactor).IsEqualTo(Constants.DefaultMaxLoadFactor);
         await Assert.That(set.MinLoadFactorTolerance).IsEqualTo(Constants.DefaultMinLoadFactorTolerance);
-        await Assert.That(set.EqualsFunction is not null).IsTrue();
-        await Assert.That(set.HashCodeFunction is not null).IsTrue();
+        // Comparer is a struct and always valid
         await Assert.That(set.LoadFactor).IsEqualTo(0d);
     }
 
     [Test]
     public async Task Constructor_ThrowsOnInvalidParameters()
     {
-        await Assert.That(() => new LargeSet<int>(capacity: 0)).Throws<Exception>();
-        await Assert.That(() => new LargeSet<int>(capacity: Constants.MaxLargeCollectionCount + 1)).Throws<Exception>();
-        await Assert.That(() => new LargeSet<int>(capacityGrowFactor: 1.0)).Throws<Exception>();
-        await Assert.That(() => new LargeSet<int>(capacityGrowFactor: Constants.MaxCapacityGrowFactor + 0.1)).Throws<Exception>();
-        await Assert.That(() => new LargeSet<int>(fixedCapacityGrowAmount: 0)).Throws<Exception>();
-        await Assert.That(() => new LargeSet<int>(fixedCapacityGrowLimit: 0)).Throws<Exception>();
-        await Assert.That(() => new LargeSet<int>(minLoadFactor: -0.1)).Throws<Exception>();
-        await Assert.That(() => new LargeSet<int>(minLoadFactor: 0.9, maxLoadFactor: 0.8)).Throws<Exception>();
-        await Assert.That(() => new LargeSet<int>(maxLoadFactor: 0.0)).Throws<Exception>();
-        await Assert.That(() => new LargeSet<int>(maxLoadFactor: 1.0, minLoadFactor: 1.0)).Throws<Exception>();
-        await Assert.That(() => new LargeSet<int>(minLoadFactorTolerance: -0.1)).Throws<Exception>();
+        await Assert.That(() => LargeSet.Create<int>(capacity: 0)).Throws<Exception>();
+        await Assert.That(() => LargeSet.Create<int>(capacity: Constants.MaxLargeCollectionCount + 1)).Throws<Exception>();
+        await Assert.That(() => LargeSet.Create<int>(capacityGrowFactor: 1.0)).Throws<Exception>();
+        await Assert.That(() => LargeSet.Create<int>(capacityGrowFactor: Constants.MaxCapacityGrowFactor + 0.1)).Throws<Exception>();
+        await Assert.That(() => LargeSet.Create<int>(fixedCapacityGrowAmount: 0)).Throws<Exception>();
+        await Assert.That(() => LargeSet.Create<int>(fixedCapacityGrowLimit: 0)).Throws<Exception>();
+        await Assert.That(() => LargeSet.Create<int>(minLoadFactor: -0.1)).Throws<Exception>();
+        await Assert.That(() => LargeSet.Create<int>(minLoadFactor: 0.9, maxLoadFactor: 0.8)).Throws<Exception>();
+        await Assert.That(() => LargeSet.Create<int>(maxLoadFactor: 0.0)).Throws<Exception>();
+        await Assert.That(() => LargeSet.Create<int>(maxLoadFactor: 1.0, minLoadFactor: 1.0)).Throws<Exception>();
+        await Assert.That(() => LargeSet.Create<int>(minLoadFactorTolerance: -0.1)).Throws<Exception>();
     }
 
     [Test]
@@ -86,7 +85,7 @@ public class LargeSetTest
     public async Task LoadFactor_TracksCountAndCapacity(long capacity)
     {
         long actualCapacity = Math.Max(1L, Math.Min(capacity, Constants.MaxLargeCollectionCount));
-        LargeSet<long> set = new(capacity: actualCapacity, maxLoadFactor: 1.0 + double.Epsilon);
+        var set = LargeSet.Create<long>(capacity: actualCapacity, maxLoadFactor: 1.0 + double.Epsilon);
 
         long addCount = Math.Min(actualCapacity, 3L);
         for (long i = 0; i < addCount; i++)
@@ -107,7 +106,7 @@ public class LargeSetTest
     public async Task Add_AddsUniqueItems(long capacity)
     {
         long actualCapacity = Math.Max(1L, Math.Min(capacity, Constants.MaxLargeCollectionCount));
-        LargeSet<long> set = new(capacity: actualCapacity);
+        var set = LargeSet.Create<long>(capacity: actualCapacity);
 
         long addCount = Math.Min(actualCapacity, 5L);
         for (long i = 0; i < addCount; i++)
@@ -127,7 +126,7 @@ public class LargeSetTest
     public async Task Add_Throws_WhenExceedingMaxCapacity(long capacity)
     {
         long actualCapacity = Math.Max(1L, Math.Min(capacity, Constants.MaxLargeCollectionCount));
-        LargeSet<long> set = new(capacity: actualCapacity, maxLoadFactor: double.MaxValue);
+        var set = LargeSet.Create<long>(capacity: actualCapacity, maxLoadFactor: double.MaxValue);
 
         for (long i = 0; i < Constants.MaxLargeCollectionCount; i++)
         {
@@ -144,7 +143,7 @@ public class LargeSetTest
     public async Task AddRange_IEnumerable_Branches(long capacity)
     {
         long actualCapacity = Math.Max(1L, Math.Min(capacity, Constants.MaxLargeCollectionCount));
-        LargeSet<long> set = new(capacity: actualCapacity);
+        var set = LargeSet.Create<long>(capacity: actualCapacity);
 
         long listCount = Math.Max(1L, Math.Min(5L, actualCapacity));
         List<long> listValues = Enumerable.Range(0, (int)listCount).Select(i => MarkerBase + i).ToList();
@@ -165,7 +164,7 @@ public class LargeSetTest
     public async Task AddRange_IReadOnlyLargeArray_Overloads(long capacity)
     {
         long actualCapacity = Math.Max(1L, Math.Min(capacity, Constants.MaxLargeCollectionCount));
-        LargeSet<long> set = new(capacity: actualCapacity);
+        var set = LargeSet.Create<long>(capacity: actualCapacity);
 
         long arrayCapacity = Math.Max(1L, Math.Min(actualCapacity, Constants.MaxLargeCollectionCount));
         LargeArray<long> array = CreateSequentialArray(arrayCapacity, MarkerBase);
@@ -194,7 +193,7 @@ public class LargeSetTest
         LargeArray<long> array = CreateSequentialArray(actualCapacity, MarkerBase);
         ReadOnlyLargeSpan<long> span = new(array, 0L, array.Count);
 
-        LargeSet<long> set = new(capacity: actualCapacity);
+        var set = LargeSet.Create<long>(capacity: actualCapacity);
         set.AddRange(span);
 
         await Assert.That(set.GetAll().ToHashSet().SetEquals(array.GetAll().ToHashSet())).IsTrue();
@@ -209,7 +208,7 @@ public class LargeSetTest
         int length = (int)Math.Max(1L, Math.Min(5L, actualCapacity));
         long[] buffer = Enumerable.Range(0, length).Select(i => MarkerBase + i).ToArray();
 
-        LargeSet<long> set = new(capacity: actualCapacity);
+        var set = LargeSet.Create<long>(capacity: actualCapacity);
         set.AddRange(buffer.AsSpan());
 
         await Assert.That(set.GetAll().ToHashSet().SetEquals(buffer.ToHashSet())).IsTrue();
@@ -219,7 +218,7 @@ public class LargeSetTest
     [Test]
     public async Task Extend_Occurs_WhenLoadFactorExceeded()
     {
-        LargeSet<long> set = new(capacity: 1, capacityGrowFactor: 1.5, fixedCapacityGrowAmount: 1, fixedCapacityGrowLimit: 2, maxLoadFactor: 0.5, minLoadFactor: 0.4, minLoadFactorTolerance: 0.5);
+        var set = LargeSet.Create<long>(capacity: 1, capacityGrowFactor: 1.5, fixedCapacityGrowAmount: 1, fixedCapacityGrowLimit: 2, maxLoadFactor: 0.5, minLoadFactor: 0.4, minLoadFactorTolerance: 0.5);
 
         long initialCapacity = set.Capacity;
         set.Add(MarkerBase);
@@ -236,7 +235,7 @@ public class LargeSetTest
     public async Task Remove_RemovesItems(long capacity)
     {
         long actualCapacity = Math.Max(1L, Math.Min(capacity, Constants.MaxLargeCollectionCount));
-        LargeSet<long> set = new(capacity: actualCapacity);
+        var set = LargeSet.Create<long>(capacity: actualCapacity);
 
         long addCount = Math.Max(1L, Math.Min(5L, actualCapacity));
         for (long i = 0; i < addCount; i++)
@@ -260,7 +259,7 @@ public class LargeSetTest
     [Test]
     public async Task Remove_TriggersShrink_WhenBelowThreshold()
     {
-        LargeSet<long> set = new(capacity: 4, capacityGrowFactor: 1.5, fixedCapacityGrowAmount: 1, fixedCapacityGrowLimit: 2, minLoadFactor: 0.75, maxLoadFactor: 0.95, minLoadFactorTolerance: 0.9);
+        var set = LargeSet.Create<long>(capacity: 4, capacityGrowFactor: 1.5, fixedCapacityGrowAmount: 1, fixedCapacityGrowLimit: 2, minLoadFactor: 0.75, maxLoadFactor: 0.95, minLoadFactorTolerance: 0.9);
 
         for (int i = 0; i < 4; i++)
         {
@@ -281,7 +280,7 @@ public class LargeSetTest
     public async Task Clear_EmptiesSet(long capacity)
     {
         long actualCapacity = Math.Max(1L, Math.Min(capacity, Constants.MaxLargeCollectionCount));
-        LargeSet<long> set = new(capacity: actualCapacity);
+        var set = LargeSet.Create<long>(capacity: actualCapacity);
 
         set.Add(MarkerBase);
         set.Add(MarkerBase + 1);
@@ -301,7 +300,7 @@ public class LargeSetTest
     public async Task TryGetValue_FindsExisting(long capacity)
     {
         long actualCapacity = Math.Max(1L, Math.Min(capacity, Constants.MaxLargeCollectionCount));
-        LargeSet<long> set = new(capacity: actualCapacity);
+        var set = LargeSet.Create<long>(capacity: actualCapacity);
         long value = MarkerBase + 42;
 
         set.Add(value);
@@ -317,7 +316,7 @@ public class LargeSetTest
     [Test]
     public async Task TryGetOrSetDefault_AddsOnDemand()
     {
-        LargeSet<long> set = new(capacity: 2);
+        var set = LargeSet.Create<long>(capacity: 2);
 
         bool exists = set.TryGetOrSetDefault(MarkerBase, out long value1);
         await Assert.That(exists).IsFalse();
@@ -332,7 +331,7 @@ public class LargeSetTest
     [Test]
     public async Task TryGetOrSet_AddsUsingComparer()
     {
-        LargeSet<string> set = new(static (l, r) => string.Equals(l, r, StringComparison.OrdinalIgnoreCase),
+        var set = LargeSet.Create<string>(static (l, r) => string.Equals(l, r, StringComparison.OrdinalIgnoreCase),
             static item => item?.ToUpperInvariant().GetHashCode() ?? 0, capacity: 2);
 
         bool found = set.TryGetOrSet("FOO", "foo", out string value1);
@@ -349,7 +348,7 @@ public class LargeSetTest
     [Test]
     public async Task TryGetOrSetFactory_UsesFactoryOnce()
     {
-        LargeSet<string> set = new(static (l, r) => string.Equals(l, r, StringComparison.OrdinalIgnoreCase),
+        var set = LargeSet.Create<string>(static (l, r) => string.Equals(l, r, StringComparison.OrdinalIgnoreCase),
             static item => item?.ToUpperInvariant().GetHashCode() ?? 0, capacity: 2);
 
         int factoryCalls = 0;
@@ -381,7 +380,7 @@ public class LargeSetTest
     public async Task Contains_ReturnsExpected(long capacity)
     {
         long actualCapacity = Math.Max(1L, Math.Min(capacity, Constants.MaxLargeCollectionCount));
-        LargeSet<long> set = new(capacity: actualCapacity);
+        var set = LargeSet.Create<long>(capacity: actualCapacity);
 
         set.Add(MarkerBase);
 
@@ -398,7 +397,7 @@ public class LargeSetTest
     public async Task GetAll_ReturnsAllUniqueItems(long capacity)
     {
         long actualCapacity = Math.Max(1L, Math.Min(capacity, Constants.MaxLargeCollectionCount));
-        LargeSet<long> set = new(capacity: actualCapacity);
+        var set = LargeSet.Create<long>(capacity: actualCapacity);
 
         long addCount = Math.Max(1L, Math.Min(5L, actualCapacity));
         for (long i = 0; i < addCount; i++)
@@ -416,7 +415,7 @@ public class LargeSetTest
     public async Task Enumerator_IteratesAllItems(long capacity)
     {
         long actualCapacity = Math.Max(1L, Math.Min(capacity, Constants.MaxLargeCollectionCount));
-        LargeSet<long> set = new(capacity: actualCapacity);
+        var set = LargeSet.Create<long>(capacity: actualCapacity);
 
         long addCount = Math.Max(1L, Math.Min(5L, actualCapacity));
         for (long i = 0; i < addCount; i++)
@@ -438,7 +437,7 @@ public class LargeSetTest
     public async Task DoForEach_AppliesActions(long capacity)
     {
         long actualCapacity = Math.Max(1L, Math.Min(capacity, Constants.MaxLargeCollectionCount));
-        LargeSet<long> set = new(capacity: actualCapacity);
+        var set = LargeSet.Create<long>(capacity: actualCapacity);
 
         long addCount = Math.Max(1L, Math.Min(5L, actualCapacity));
         for (long i = 0; i < addCount; i++)
@@ -450,12 +449,11 @@ public class LargeSetTest
         set.DoForEach(item => sum += item);
         await Assert.That(sum).IsEqualTo(set.GetAll().Sum());
 
-        long userDataSum = 0;
-        set.DoForEach(static (long item, ref long total) => total += item, ref userDataSum);
-        await Assert.That(userDataSum).IsEqualTo(set.GetAll().Sum());
+        SumAction sumAction = new ();
+        set.DoForEach(ref sumAction);
+        await Assert.That(sumAction.Sum).IsEqualTo(set.GetAll().Sum());
 
         await Assert.That(() => set.DoForEach((Action<long>)null!)).Throws<Exception>();
-        await Assert.That(() => set.DoForEach((ActionWithUserData<long, long>)null!, ref userDataSum)).Throws<Exception>();
     }
 
     #endregion
@@ -478,5 +476,127 @@ public class LargeSetTest
     }
 
     #endregion
+
+    #region Edge Cases
+
+    [Test]
+    public async Task Add_SameItemRepeatedly_DoesNotIncrementCount()
+    {
+        var set = LargeSet.Create<long>();
+
+        set.Add(MarkerBase);
+        set.Add(MarkerBase);
+        set.Add(MarkerBase);
+
+        await Assert.That(set.Count).IsEqualTo(1L);
+        await Assert.That(set.Contains(MarkerBase)).IsTrue();
+    }
+
+    [Test]
+    public async Task CustomHashFunction_WithCollisions_ResolvesCorrectly()
+    {
+        // Use a hash function that always returns the same value (worst case)
+        var set = LargeSet.Create<long>(
+            equalsFunction: (a, b) => a == b,
+            hashCodeFunction: _ => 42,  // All items hash to same bucket
+            capacity: 10
+        );
+
+        set.Add(MarkerBase);
+        set.Add(MarkerBase + 1);
+        set.Add(MarkerBase + 2);
+
+        await Assert.That(set.Count).IsEqualTo(3L);
+        await Assert.That(set.Contains(MarkerBase)).IsTrue();
+        await Assert.That(set.Contains(MarkerBase + 1)).IsTrue();
+        await Assert.That(set.Contains(MarkerBase + 2)).IsTrue();
+    }
+
+    [Test]
+    public async Task TryGetOrSet_WithFactory_FactoryOnlyCalledWhenNotFound()
+    {
+        var set = LargeSet.Create<long>();
+        int factoryCalls = 0;
+
+        // First call - item not found, factory should be called
+        bool found1 = set.TryGetOrSet(MarkerBase, () => { factoryCalls++; return MarkerBase; }, out long value1);
+
+        await Assert.That(found1).IsFalse();
+        await Assert.That(value1).IsEqualTo(MarkerBase);
+        await Assert.That(factoryCalls).IsEqualTo(1);
+
+        // Second call - item found, factory should NOT be called
+        bool found2 = set.TryGetOrSet(MarkerBase, () => { factoryCalls++; return MarkerBase; }, out long value2);
+
+        await Assert.That(found2).IsTrue();
+        await Assert.That(value2).IsEqualTo(MarkerBase);
+        await Assert.That(factoryCalls).IsEqualTo(1);  // Still 1, not called again
+    }
+
+    [Test]
+    public async Task TryGetOrSet_NullFactory_Throws()
+    {
+        var set = LargeSet.Create<long>();
+
+        await Assert.That(() => set.TryGetOrSet(MarkerBase, (Func<long>)null!, out _)).Throws<Exception>();
+    }
+
+    [Test]
+    public async Task Remove_NonExistentItem_ReturnsFalse()
+    {
+        var set = LargeSet.Create<long>();
+        set.Add(MarkerBase);
+
+        bool removed = set.Remove(MarkerBase + 100);
+
+        await Assert.That(removed).IsFalse();
+        await Assert.That(set.Count).IsEqualTo(1L);
+    }
+
+    [Test]
+    public async Task Remove_WithRemovedItem_ReturnsCorrectItem()
+    {
+        var set = LargeSet.Create<long>();
+        set.Add(MarkerBase);
+        set.Add(MarkerBase + 1);
+
+        bool removed = set.Remove(MarkerBase, out long removedItem);
+
+        await Assert.That(removed).IsTrue();
+        await Assert.That(removedItem).IsEqualTo(MarkerBase);
+    }
+
+    [Test]
+    public async Task Shrink_ReducesCapacity()
+    {
+        var set = LargeSet.Create<long>(capacity: 100, minLoadFactor: 0.25);
+
+        // Add some items
+        for (long i = 0; i < 10; i++)
+        {
+            set.Add(MarkerBase + i);
+        }
+
+        long capacityBefore = set.Capacity;
+        set.Shrink();
+        long capacityAfter = set.Capacity;
+
+        // Capacity should be reduced or stay same if already optimal
+        await Assert.That(capacityAfter).IsLessThanOrEqualTo(capacityBefore);
+        await Assert.That(set.Count).IsEqualTo(10L);  // Items preserved
+    }
+
+    #endregion
+
+    #region Helper Structs
+
+    private struct SumAction : ILargeAction<long>
+    {
+        public long Sum;
+        public void Invoke(long item) => Sum += item;
+    }
+
+    #endregion
 }
+
 

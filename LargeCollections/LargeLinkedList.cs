@@ -35,7 +35,7 @@ namespace LargeCollections;
 /// A linked list of <typeparamref name="T"/> that can store up to <see cref="Constants.MaxLargeCollectionCount"/> elements.
 /// </summary>
 /// <typeparam name="T">The type of elements in the list</typeparam>
-[DebuggerDisplay("LargeList: Count = {Count}")]
+[DebuggerDisplay("LargeLinkedList: Count = {Count}")]
 public class LargeLinkedList<T> : ILargeCollection<T>
 {
     private Node _Head;
@@ -406,7 +406,7 @@ public class LargeLinkedList<T> : ILargeCollection<T>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public bool Remove(T value, out T removedItem, Func<T, T, bool> equalsFunction)
     {
-        equalsFunction ??= LargeSet<T>.DefaultEqualsFunction;
+        equalsFunction ??= DefaultFunctions<T>.DefaultEqualsFunction;
 
         removedItem = default;
         Node node = Find(value, equalsFunction);
@@ -469,7 +469,7 @@ public class LargeLinkedList<T> : ILargeCollection<T>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public Node Find(T value, Func<T, T, bool> equalsFunction = null)
     {
-        equalsFunction ??= LargeSet<T>.DefaultEqualsFunction;
+        equalsFunction ??= DefaultFunctions<T>.DefaultEqualsFunction;
         Node current = _Head;
 
         while (current is not null)
@@ -490,7 +490,7 @@ public class LargeLinkedList<T> : ILargeCollection<T>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public Node FindLast(T value, Func<T, T, bool> equalsFunction = null)
     {
-        equalsFunction ??= LargeSet<T>.DefaultEqualsFunction;
+        equalsFunction ??= DefaultFunctions<T>.DefaultEqualsFunction;
         Node current = _Tail;
 
         while (current is not null)
@@ -511,14 +511,9 @@ public class LargeLinkedList<T> : ILargeCollection<T>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void Clear()
     {
-        Node current = _Head;
-        while (current is not null)
-        {
-            Node next = current.Next;
-            current.Invalidate();
-            current = next;
-        }
-
+        // Simply reset head/tail - GC will clean up the nodes
+        // This is O(1) instead of O(n)
+        // Note: Nodes will have stale references but they're no longer accessible
         _Head = null;
         _Tail = null;
         _Count = 0L;
@@ -526,15 +521,24 @@ public class LargeLinkedList<T> : ILargeCollection<T>
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public bool Contains(T item)
-        => Contains(item, null);
+    {
+        Func<T, T, bool> equalsFunction = DefaultFunctions<T>.DefaultEqualsFunction;
+        return Find(item, equalsFunction) is not null;
+    }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public bool Contains(T item, Func<T, T, bool> equalsFunction)
     {
-        equalsFunction ??= LargeSet<T>.DefaultEqualsFunction;
+        equalsFunction ??= DefaultFunctions<T>.DefaultEqualsFunction;
         return Find(item, equalsFunction) is not null;
     }
 
+    #region DoForEach Methods
+
+    /// <summary>
+    /// Performs the <paramref name="action"/> with items of the linked list.
+    /// </summary>
+    /// <param name="action">The function that will be called for each item.</param>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void DoForEach(Action<T> action)
     {
@@ -551,21 +555,23 @@ public class LargeLinkedList<T> : ILargeCollection<T>
         }
     }
 
+    /// <summary>
+    /// Performs the action on items using an action for optimal performance.
+    /// </summary>
+    /// <typeparam name="TAction">A type implementing <see cref="ILargeAction{T}"/>.</typeparam>
+    /// <param name="action">The action instance passed by reference.</param>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public void DoForEach<TUserData>(ActionWithUserData<T, TUserData> action, ref TUserData userData)
+    public void DoForEach<TAction>(ref TAction action) where TAction : ILargeAction<T>
     {
-        if (action is null)
-        {
-            throw new ArgumentNullException(nameof(action));
-        }
-
         Node current = _Head;
         while (current is not null)
         {
-            action.Invoke(current.Value, ref userData);
+            action.Invoke(current.Value);
             current = current.Next;
         }
     }
+
+    #endregion
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public IEnumerable<T> GetAll()

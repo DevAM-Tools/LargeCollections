@@ -1,4 +1,4 @@
-﻿/*
+/*
 MIT License
 SPDX-License-Identifier: MIT
 
@@ -39,9 +39,9 @@ public static class EnumerableExtensions
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static LargeSet<T> ToLargeSet<T>(this IEnumerable<T> items)
+    public static LargeSet<T, ObjectEqualityComparer<T>> ToLargeSet<T>(this IEnumerable<T> items)
     {
-        LargeSet<T> largeSet = [];
+        LargeSet<T, ObjectEqualityComparer<T>> largeSet = LargeSet.Create<T>();
         largeSet.AddRange(items);
         return largeSet;
     }

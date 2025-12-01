@@ -25,8 +25,230 @@ SOFTWARE.
 
 using System;
 using System.Collections.Generic;
+using System.Runtime.CompilerServices;
 
 namespace LargeCollections;
+
+#region High-Performance Comparer Structs
+
+/// <summary>
+/// Default comparer for types implementing <see cref="IComparable{T}"/>.
+/// This struct implementation enables JIT devirtualization and inlining for optimal performance.
+/// </summary>
+/// <typeparam name="T">The type to compare. Must implement <see cref="IComparable{T}"/>.</typeparam>
+public readonly struct DefaultComparer<T> : IComparer<T> where T : IComparable<T>
+{
+    /// <inheritdoc/>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public int Compare(T left, T right)
+    {
+        if (left is null)
+        {
+            return right is null ? 0 : -1;
+        }
+        return left.CompareTo(right);
+    }
+}
+
+/// <summary>
+/// Descending comparer for types implementing <see cref="IComparable{T}"/>.
+/// This struct implementation enables JIT devirtualization and inlining for optimal performance.
+/// </summary>
+/// <typeparam name="T">The type to compare. Must implement <see cref="IComparable{T}"/>.</typeparam>
+public readonly struct DescendingComparer<T> : IComparer<T> where T : IComparable<T>
+{
+    /// <inheritdoc/>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public int Compare(T left, T right)
+    {
+        if (right is null)
+        {
+            return left is null ? 0 : -1;
+        }
+        return right.CompareTo(left);
+    }
+}
+
+/// <summary>
+/// Default equality comparer for types implementing <see cref="IEquatable{T}"/>.
+/// This struct implementation enables JIT devirtualization and inlining for optimal performance.
+/// </summary>
+/// <typeparam name="T">The type to compare. Must implement <see cref="IEquatable{T}"/>.</typeparam>
+public readonly struct DefaultEqualityComparer<T> : IEqualityComparer<T> where T : IEquatable<T>
+{
+    /// <inheritdoc/>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public bool Equals(T left, T right)
+    {
+        if (left is null)
+        {
+            return right is null;
+        }
+        return left.Equals(right);
+    }
+
+    /// <inheritdoc/>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public int GetHashCode(T item)
+    {
+        return item?.GetHashCode() ?? 0;
+    }
+}
+
+/// <summary>
+/// Default equality comparer for any type using <see cref="EqualityComparer{T}.Default"/>.
+/// This struct implementation wraps the default equality comparer for types that may not implement <see cref="IEquatable{T}"/>.
+/// For types implementing <see cref="IEquatable{T}"/>, prefer <see cref="DefaultEqualityComparer{T}"/> for better performance.
+/// </summary>
+/// <typeparam name="T">The type to compare.</typeparam>
+public readonly struct ObjectEqualityComparer<T> : IEqualityComparer<T>
+{
+    /// <inheritdoc/>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public bool Equals(T left, T right)
+        => EqualityComparer<T>.Default.Equals(left, right);
+
+    /// <inheritdoc/>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public int GetHashCode(T item)
+        => item is not null ? EqualityComparer<T>.Default.GetHashCode(item) : 0;
+}
+
+/// <summary>
+/// Wrapper that adapts a <see cref="Func{T, T, TResult}"/> delegate to the <see cref="IComparer{T}"/> interface.
+/// Use this when you have an existing delegate but want to use the generic comparer overloads.
+/// Note: This wrapper has the same performance as direct delegate usage.
+/// </summary>
+/// <typeparam name="T">The type to compare.</typeparam>
+public readonly struct DelegateComparer<T> : IComparer<T>
+{
+    private readonly Func<T, T, int> _comparer;
+
+    /// <summary>
+    /// Creates a new delegate wrapper comparer.
+    /// </summary>
+    /// <param name="comparer">The comparison delegate to wrap.</param>
+    public DelegateComparer(Func<T, T, int> comparer)
+    {
+        _comparer = comparer ?? throw new ArgumentNullException(nameof(comparer));
+    }
+
+    /// <inheritdoc/>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public int Compare(T left, T right) => _comparer(left, right);
+}
+
+/// <summary>
+/// Wrapper that adapts <see cref="Func{T, T, TResult}"/> delegates to the <see cref="IEqualityComparer{T}"/> interface.
+/// Use this when you have existing delegates but want to use the generic comparer overloads.
+/// Note: This wrapper has the same performance as direct delegate usage.
+/// </summary>
+/// <typeparam name="T">The type to compare.</typeparam>
+public readonly struct DelegateEqualityComparer<T> : IEqualityComparer<T>
+{
+    private readonly Func<T, T, bool> _equals;
+    private readonly Func<T, int> _hashCode;
+
+    /// <summary>
+    /// Creates a new delegate wrapper equality comparer.
+    /// </summary>
+    /// <param name="equals">The equality delegate to wrap.</param>
+    /// <param name="hashCode">The hash code delegate to wrap.</param>
+    public DelegateEqualityComparer(Func<T, T, bool> equals, Func<T, int> hashCode)
+    {
+        _equals = equals ?? throw new ArgumentNullException(nameof(equals));
+        _hashCode = hashCode ?? throw new ArgumentNullException(nameof(hashCode));
+    }
+
+    /// <inheritdoc/>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public bool Equals(T left, T right) => _equals(left, right);
+
+    /// <inheritdoc/>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public int GetHashCode(T item) => _hashCode(item);
+}
+
+#endregion
+
+#region High-Performance Action Interfaces
+
+/// <summary>
+/// High-performance action interface for iteration callbacks.
+/// Using struct implementations enables JIT devirtualization and inlining for optimal performance.
+/// Store any user data directly as fields in your struct implementation - the action is passed by ref
+/// so state changes are preserved after iteration.
+/// </summary>
+/// <typeparam name="T">The type of items to process.</typeparam>
+/// <example>
+/// <code>
+/// struct SumAction : ILargeAction&lt;long&gt;
+/// {
+///     public long Sum;  // User data stored directly in the struct
+///     public void Invoke(long item) =&gt; Sum += item;
+/// }
+/// 
+/// SumAction action = new SumAction();
+/// array.DoForEach(ref action);  // Passed by ref - state is preserved
+/// Console.WriteLine(action.Sum);
+/// </code>
+/// </example>
+public interface ILargeAction<T>
+{
+    /// <summary>
+    /// Executes the action on the specified item.
+    /// </summary>
+    /// <param name="item">The item to process.</param>
+    void Invoke(T item);
+}
+
+/// <summary>
+/// High-performance action interface for iteration callbacks with ref access to items.
+/// Using struct implementations enables JIT devirtualization and inlining for optimal performance.
+/// Store any user data directly as fields in your struct implementation - the action is passed by ref
+/// so state changes are preserved after iteration.
+/// </summary>
+/// <typeparam name="T">The type of items to process.</typeparam>
+/// <example>
+/// <code>
+/// struct IncrementAction : ILargeRefAction&lt;int&gt;
+/// {
+///     public int IncrementBy;
+///     public int ModifiedCount;  // User data
+///     public void Invoke(ref int item) { item += IncrementBy; ModifiedCount++; }
+/// }
+/// 
+/// IncrementAction action = new IncrementAction { IncrementBy = 10 };
+/// array.DoForEachRef(ref action);
+/// Console.WriteLine($"Modified {action.ModifiedCount} items");
+/// </code>
+/// </example>
+public interface ILargeRefAction<T>
+{
+    /// <summary>
+    /// Executes the action on the specified item by reference.
+    /// </summary>
+    /// <param name="item">A reference to the item to process.</param>
+    void Invoke(ref T item);
+}
+
+/// <summary>
+/// Wrapper that adapts a delegate to the <see cref="ILargeAction{T}"/> interface.
+/// </summary>
+public readonly struct DelegateLargeAction<T> : ILargeAction<T>
+{
+    private readonly Action<T> _action;
+
+    public DelegateLargeAction(Action<T> action)
+    {
+        _action = action ?? throw new ArgumentNullException(nameof(action));
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public void Invoke(T item) => _action(item);
+}
+
+#endregion
 
 public interface IReadOnlyLargeCollection<T> : IEnumerable<T>
 {
@@ -53,17 +275,17 @@ public interface IReadOnlyLargeCollection<T> : IEnumerable<T>
     /// Performs the <paramref name="action"/> with items of the collection.
     /// Depending on the actual collection implementation (i.e. <see cref="LargeArray{T}"/>) this may be significantly faster than iterating over all elements in a foreach-loop.
     /// </summary>
-    /// <param name="action">The function that that will be called for each item of the collection.</param>
+    /// <param name="action">The function that will be called for each item of the collection.</param>
     void DoForEach(Action<T> action);
 
     /// <summary>
-    /// Performs the <paramref name="action"/> with items of the collection.
-    /// It allows to pass user data to the action to prevent capturing variables.
-    /// Depending on the actual collection implementation (i.e. <see cref="LargeArray{T}"/>) this may be significantly faster than iterating over all elements in a foreach-loop.
+    /// Performs the <paramref name="action"/> with items of the collection using an action type for optimal performance.
+    /// Using struct implementations enables JIT devirtualization and inlining.
+    /// Store any user data directly as fields in your type - the action is passed by ref so state changes are preserved.
     /// </summary>
-    /// <param name="action">The function that that will be called for each item of the collection.</param>
-    /// <param name="userData">The user data that will be passed to the action.</param>
-    void DoForEach<TUserData>(ActionWithUserData<T, TUserData> action, ref TUserData userData);
+    /// <typeparam name="TAction">A type implementing <see cref="ILargeAction{T}"/>. Struct implementations enable JIT optimizations.</typeparam>
+    /// <param name="action">The action instance passed by reference.</param>
+    void DoForEach<TAction>(ref TAction action) where TAction : ILargeAction<T>;
 }
 
 public interface ILargeCollection<T> : IReadOnlyLargeCollection<T>
@@ -138,28 +360,46 @@ public interface IReadOnlyLargeArray<T> : IReadOnlyLargeCollection<T>
     T Get(long index);
 
     /// <summary>
-    /// Performs a binary search to find the index at which the <paramref name="item"/> is located.
-    /// The collection must be sorted in ascending order according to <paramref name="comparer"/>. Otherwise you will get undefined results.
+    /// Performs a binary search using the default comparer.
+    /// The collection must be sorted in ascending order.
     /// </summary>
-    /// <param name="item">The <paramref name="item"/> whose location shall be found.</param>
-    /// <param name="comparer">The <paramref name="comparer"/> function will be used to compare the items of the collection.</param>
-    /// <returns>The 0-based index of the <paramref name="item"/> if it was found.
-    /// If the <paramref name="item"/> could not be found a negative number will be returned.
-    /// If the specified <paramref name="item"/> is not unique within the collection only one of the potential candidates will be returned.</returns>
-    long BinarySearch(T item, Func<T, T, int> comparer);
+    /// <param name="item">The item whose location shall be found.</param>
+    /// <param name="offset">Optional starting offset. If null, starts from 0.</param>
+    /// <param name="count">Optional number of elements to search. If null, searches all remaining elements.</param>
+    /// <returns>The 0-based index of the item if found; otherwise, a negative number.</returns>
+    long BinarySearch(T item, long? offset = null, long? count = null);
 
     /// <summary>
-    /// Performs a binary search to find the index at which the <paramref name="item"/> is located within the given range defined by <paramref name="offset"/> and <paramref name="count"/>.
-    /// The collection must be sorted in ascending order according to <paramref name="comparer"/>. Otherwise you will get undefined results.
+    /// Performs a binary search using a generic comparer for optimal performance through JIT devirtualization.
+    /// The collection must be sorted in ascending order according to <paramref name="comparer"/>.
     /// </summary>
-    /// <param name="item">The <paramref name="item"/> whose location shall be found.</param>
-    /// <param name="comparer">The <paramref name="comparer"/> function will be used to compare the items of the collection.</param>
-    /// <param name="offset">The <paramref name="offset"/> where the range starts.</param>
-    /// <param name="count">The <paramref name="count"/> of elements that belong to the range.</param>
-    /// <returns>The 0-based index of the <paramref name="item"/> if it was found.
-    /// If the <paramref name="item"/> could not be found a negative number will be returned.
-    /// If the specified <paramref name="item"/> is not unique within the collection only one of the potential candidates will be returned.</returns>
-    long BinarySearch(T item, Func<T, T, int> comparer, long offset, long count);
+    /// <typeparam name="TComparer">A type implementing <see cref="IComparer{T}"/>.</typeparam>
+    /// <param name="item">The item whose location shall be found.</param>
+    /// <param name="comparer">The comparer instance.</param>
+    /// <param name="offset">Optional starting offset. If null, starts from 0.</param>
+    /// <param name="count">Optional number of elements to search. If null, searches all remaining elements.</param>
+    /// <returns>The 0-based index of the item if found; otherwise, a negative number.</returns>
+    long BinarySearch<TComparer>(T item, TComparer comparer, long? offset = null, long? count = null) where TComparer : IComparer<T>;
+
+    /// <summary>
+    /// Performs the <paramref name="action"/> with items of the collection within the specified range.
+    /// Depending on the actual collection implementation (i.e. <see cref="LargeArray{T}"/>) this may be significantly faster than iterating over all elements in a foreach-loop.
+    /// </summary>
+    /// <param name="action">The function that will be called for each item of the collection.</param>
+    /// <param name="offset">Starting offset.</param>
+    /// <param name="count">Number of elements to process.</param>
+    void DoForEach(Action<T> action, long offset, long count);
+
+    /// <summary>
+    /// Performs the <paramref name="action"/> with items of the collection using an action type for optimal performance.
+    /// Using struct implementations enables JIT devirtualization and inlining.
+    /// Store any user data directly as fields in your type - the action is passed by ref so state changes are preserved.
+    /// </summary>
+    /// <typeparam name="TAction">A type implementing <see cref="ILargeAction{T}"/>. Struct implementations enable JIT optimizations.</typeparam>
+    /// <param name="action">The action instance passed by reference.</param>
+    /// <param name="offset">Starting offset.</param>
+    /// <param name="count">Number of elements to process.</param>
+    void DoForEach<TAction>(ref TAction action, long offset, long count) where TAction : ILargeAction<T>;
 
     /// <summary>
     /// Returns all items of the collection as an <see cref="IEnumerable{T}"/> within the given range defined by <paramref name="offset"/> and <paramref name="count"/>.
@@ -173,112 +413,61 @@ public interface IReadOnlyLargeArray<T> : IReadOnlyLargeCollection<T>
     /// Finds the index of the first occurance of an <paramref name="item"/> within the collection.
     /// </summary>
     /// <param name="item">The item to find.</param>
+    /// <param name="offset">Optional starting offset. If null, starts from 0.</param>
+    /// <param name="count">Optional number of elements to search. If null, searches all remaining elements.</param>
     /// <returns>The 0-based index of the item if it was found; otherwise, -1.</returns>
-    long IndexOf(T item);
+    long IndexOf(T item, long? offset = null, long? count = null);
 
     /// <summary>
-    /// Finds the index of the first occurance of an <paramref name="item"/> within the collection using a custom equality function.
+    /// Finds the index of the first occurrence of an item using a generic equality comparer for optimal performance.
     /// </summary>
+    /// <typeparam name="TComparer">A type implementing <see cref="IEqualityComparer{T}"/>.</typeparam>
     /// <param name="item">The item to find.</param>
-    /// <param name="equalsFunction">The function that defines how to compare items.</param>
-    /// <returns>The 0-based index of the item if it was found; otherwise, -1.</returns>
-    long IndexOf(T item, Func<T, T, bool> equalsFunction);
-
-    /// <summary>
-    /// Finds the index of the first occurance of an <paramref name="item"/> within the given range defined by <paramref name="offset"/> and <paramref name="count"/>.
-    /// </summary>
-    /// <param name="item">The item to find.</param>
-    /// <param name="offset">The <paramref name="offset"/> where the range starts.</param>
-    /// <param name="count">The <paramref name="count"/> of elements that belong to the range.</param>
-    /// <returns>The 0-based index of the item if it was found; otherwise, -1.</returns>
-    long IndexOf(T item, long offset, long count);
-
-    /// <summary>
-    /// Finds the index of the first occurance of an <paramref name="item"/> within the collection using a custom equality function.
-    /// </summary>
-    /// <param name="item">The item to find.</param>
-    /// <param name="equalsFunction">The function that defines how to compare items.</param>
-    /// <returns>The 0-based index of the item if it was found; otherwise, -1.</returns>
-    long IndexOf(T item, long offset, long count, Func<T, T, bool> equalsFunction);
+    /// <param name="comparer">The comparer instance passed by reference.</param>
+    /// <param name="offset">Optional starting offset. If null, starts from 0.</param>
+    /// <param name="count">Optional number of elements to search. If null, searches all remaining elements.</param>
+    /// <returns>The 0-based index of the item if found; otherwise, -1.</returns>
+    long IndexOf<TComparer>(T item, ref TComparer comparer, long? offset = null, long? count = null) where TComparer : IEqualityComparer<T>;
 
     /// <summary>
     /// Finds the index of the last occurance of an <paramref name="item"/> within the collection.
     /// </summary>
     /// <param name="item">The item to find.</param>
+    /// <param name="offset">Optional starting offset. If null, starts from 0.</param>
+    /// <param name="count">Optional number of elements to search. If null, searches all remaining elements.</param>
     /// <returns>The 0-based index of the item if it was found; otherwise, -1.</returns>
-    long LastIndexOf(T item);
+    long LastIndexOf(T item, long? offset = null, long? count = null);
 
     /// <summary>
-    /// Finds the index of the last occurance of an <paramref name="item"/> within the collection using a custom equality function.
+    /// Finds the index of the last occurrence of an item using a generic equality comparer for optimal performance.
     /// </summary>
+    /// <typeparam name="TComparer">A type implementing <see cref="IEqualityComparer{T}"/>.</typeparam>
     /// <param name="item">The item to find.</param>
-    /// <param name="equalsFunction">The function that defines how to compare items.</param>
-    /// <returns>The 0-based index of the item if it was found; otherwise, -1.</returns>
-    long LastIndexOf(T item, Func<T, T, bool> equalsFunction);
+    /// <param name="comparer">The comparer instance passed by reference.</param>
+    /// <param name="offset">Optional starting offset. If null, starts from 0.</param>
+    /// <param name="count">Optional number of elements to search. If null, searches all remaining elements.</param>
+    /// <returns>The 0-based index of the item if found; otherwise, -1.</returns>
+    long LastIndexOf<TComparer>(T item, ref TComparer comparer, long? offset = null, long? count = null) where TComparer : IEqualityComparer<T>;
 
     /// <summary>
-    /// Finds the index of the last occurance of an <paramref name="item"/> within the given range defined by <paramref name="offset"/> and <paramref name="count"/>.
-    /// </summary>
-    /// <param name="item">The item to find.</param>
-    /// <param name="offset">The <paramref name="offset"/> where the range starts.</param>
-    /// <param name="count">The <paramref name="count"/> of elements that belong to the range.</param>
-    /// <returns>The 0-based index of the item if it was found; otherwise, -1.</returns>
-    long LastIndexOf(T item, long offset, long count);
-
-    /// <summary>
-    /// Finds the index of the first occurance of an <paramref name="item"/> within the collection using a custom equality function.
-    /// </summary>
-    /// <param name="item">The item to find.</param>
-    /// <param name="equalsFunction">The function that defines how to compare items.</param>
-    /// <returns>The 0-based index of the item if it was found; otherwise, -1.</returns>
-    long LastIndexOf(T item, long offset, long count, Func<T, T, bool> equalsFunction);
-
-    /// <summary>
-    /// Determines whether the collection contains a specific <paramref name="item"/> within the given range defined by <paramref name="offset"/> and <paramref name="count"/>.
+    /// Determines whether the collection contains a specific <paramref name="item"/> within the specified range.
     /// </summary>
     /// <param name="item">The item that shall be found.</param>
-    /// <param name="offset">The <paramref name="offset"/> where the range starts.</param>
-    /// <param name="count">The <paramref name="count"/> of elements that belong to the range.</param>
+    /// <param name="offset">Starting offset.</param>
+    /// <param name="count">Number of elements to search.</param>
     /// <returns>true if the <paramref name="item"/> is present within the collection. Otherwise false is returned.</returns>
     bool Contains(T item, long offset, long count);
 
     /// <summary>
-    /// Determines whether the collection contains a specific <paramref name="item"/> using a custom equality function.
+    /// Determines whether the collection contains a specific item using a generic equality comparer for optimal performance.
     /// </summary>
-    /// <param name="item">The item that shall be found.</param>
-    /// <param name="equalsFunction">The function that defines how to compare items.</param>
-    /// <returns>true if the <paramref name="item"/> is present within the collection. Otherwise false is returned.</returns>
-    bool Contains(T item, Func<T, T, bool> equalsFunction);
-
-    /// <summary>
-    /// Determines whether the collection contains a specific <paramref name="item"/> within the given range defined by <paramref name="offset"/> and <paramref name="count"/>.
-    /// </summary>
-    /// <param name="item">The item that shall be found.</param>
-    /// <param name="offset">The <paramref name="offset"/> where the range starts.</param>
-    /// <param name="count">The <paramref name="count"/> of elements that belong to the range.</param>
-    /// <param name="equalsFunction">The function that defines how to compare items.</param>
-    /// <returns>true if the <paramref name="item"/> is present within the collection. Otherwise false is returned.</returns>
-    bool Contains(T item, long offset, long count, Func<T, T, bool> equalsFunction);
-
-    /// <summary>
-    /// Performs the <paramref name="action"/> with items of the collection within the given range defined by <paramref name="offset"/> and <paramref name="count"/>.
-    /// Depending on the actual collection implementation (i.e. <see cref="LargeArray{T}"/>) this may be significantly faster than iterating over all elements in a foreach-loop.
-    /// </summary>
-    /// <param name="action">The function that that will be called for each item of the collection.</param>
-    /// <param name="offset">The <paramref name="offset"/> where the range starts.</param>
-    /// <param name="count">The <paramref name="count"/> of elements that belong to the range.</param>
-    void DoForEach(Action<T> action, long offset, long count);
-
-    /// <summary>
-    /// Performs the <paramref name="action"/> with items of the collection.
-    /// It allows to pass user data to the action to prevent capturing variables.
-    /// Depending on the actual collection implementation (i.e. <see cref="LargeArray{T}"/>) this may be significantly faster than iterating over all elements in a foreach-loop.
-    /// </summary>
-    /// <param name="action">The function that that will be called for each item of the collection.</param>
-    /// <param name="offset">The <paramref name="offset"/> where the range starts.</param>
-    /// <param name="count">The <paramref name="count"/> of elements that belong to the range.</param>
-    /// <param name="userData">The user data that will be passed to the action.</param>
-    void DoForEach<TUserData>(ActionWithUserData<T, TUserData> action, long offset, long count, ref TUserData userData);
+    /// <typeparam name="TComparer">A type implementing <see cref="IEqualityComparer{T}"/>.</typeparam>
+    /// <param name="item">The item to find.</param>
+    /// <param name="comparer">The comparer instance passed by reference.</param>
+    /// <param name="offset">Optional starting offset. If null, starts from 0.</param>
+    /// <param name="count">Optional number of elements to search. If null, searches all remaining elements.</param>
+    /// <returns>true if the item is present; otherwise, false.</returns>
+    bool Contains<TComparer>(T item, ref TComparer comparer, long? offset = null, long? count = null) where TComparer : IEqualityComparer<T>;
 
     /// <summary>
     /// Copies <paramref name="count"/> items to the <paramref name="target"/> at <paramref name="targetOffset"/> from this collection at <paramref name="sourceOffset"/>.
@@ -336,18 +525,13 @@ public interface ILargeArray<T> : IReadOnlyLargeArray<T>
     void Set(long index, T item);
 
     /// <summary>
-    /// Reorders the items of the collection in ascending order according to <paramref name="comparer"/>.
+    /// Reorders the items of the collection in ascending order using a generic comparer for optimal performance.
     /// </summary>
-    /// <param name="comparer">The <paramref name="comparer"/> function will be used to compare the items of the collection.</param>
-    void Sort(Func<T, T, int> comparer);
-
-    /// <summary>
-    /// Reorders the items of the collection within the given range defined by <paramref name="offset"/> and <paramref name="count"/> in ascending order according to <paramref name="comparer"/>.
-    /// </summary>
-    /// <param name="comparer">The <paramref name="comparer"/> function will be used to compare the items of the collection.</param>
-    /// <param name="offset">The <paramref name="offset"/> where the range starts.</param>
-    /// <param name="count">The <paramref name="count"/> of elements that belong to the range.</param>
-    void Sort(Func<T, T, int> comparer, long offset, long count);
+    /// <typeparam name="TComparer">A type implementing <see cref="IComparer{T}"/>.</typeparam>
+    /// <param name="comparer">The comparer instance.</param>
+    /// <param name="offset">Optional starting offset. If null, starts from 0.</param>
+    /// <param name="count">Optional number of elements to sort. If null, sorts all remaining elements.</param>
+    void Sort<TComparer>(TComparer comparer, long? offset = null, long? count = null) where TComparer : IComparer<T>;
 
     /// <summary>
     /// Swaps the the item at index <paramref name="leftIndex"/> with the item at <paramref name="rightIndex"/>.
@@ -399,46 +583,28 @@ public interface IRefAccessLargeArray<T> : ILargeArray<T>
 {
     /// <summary>
     /// Gets a reference to the item at the specified 0-based <paramref name="index"/> if <paramref name="index"/> is within the valid range.
+    /// The reference can be used to read or modify the item directly.
+    /// </summary>
+    /// <param name="index">The 0-based <paramref name="index"/> of the location where the item shall be accessed.</param>
+    /// <returns>A reference to the item which is located at the specified 0-based <paramref name="index"/> if <paramref name="index"/> was within the valid range.</returns>
+    new ref T this[long index] { get; }
+
+    /// <summary>
+    /// Gets a reference to the item at the specified 0-based <paramref name="index"/> if <paramref name="index"/> is within the valid range.
     /// </summary>
     /// <param name="index">The 0-based <paramref name="index"/> of the location where the item shall be got from.</param>
     /// <returns>A reference to the item which is located at the specified 0-based <paramref name="index"/> if <paramref name="index"/> was within the valid range.</returns>
     ref T GetRef(long index);
 
     /// <summary>
-    /// Performs the <paramref name="action"/> with items of the collection.
-    /// Depending on the actual collection implementation (i.e. <see cref="LargeArray{T}"/>) this may be significantly faster than iterating over all elements in a foreach-loop.
+    /// Performs the <paramref name="action"/> with items by reference of the collection using a action passed by reference for optimal performance.
+    /// Store any user data directly as fields in your action - the action is passed by ref so state changes are preserved.
     /// </summary>
-    /// <param name="action">The function that that will be called for each item of the collection.</param>
-    void DoForEach(RefAction<T> action);
-
-    /// <summary>
-    /// Performs the <paramref name="action"/> with items of the collection within the given range defined by <paramref name="offset"/> and <paramref name="count"/>.
-    /// Depending on the actual collection implementation (i.e. <see cref="LargeArray{T}"/>) this may be significantly faster than iterating over all elements in a foreach-loop.
-    /// </summary>
-    /// <param name="action">The function that that will be called for each item of the collection.</param>
-    /// <param name="offset">The <paramref name="offset"/> where the range starts.</param>
-    /// <param name="count">The <paramref name="count"/> of elements that belong to the range.</param>
-    void DoForEach(RefAction<T> action, long offset, long count);
-
-    /// <summary>
-    /// Performs the <paramref name="action"/> with items of the collection.
-    /// It allows to pass user data to the action to prevent capturing variables.
-    /// Depending on the actual collection implementation (i.e. <see cref="LargeArray{T}"/>) this may be significantly faster than iterating over all elements in a foreach-loop.
-    /// </summary>
-    /// <param name="action">The function that that will be called for each item of the collection.</param>
-    /// <param name="userData">The user data that will be passed to the action.</param>
-    void DoForEach<TUserData>(RefActionWithUserData<T, TUserData> action, ref TUserData userData);
-
-    /// <summary>
-    /// Performs the <paramref name="action"/> with items of the collection within the given range defined by <paramref name="offset"/> and <paramref name="count"/>.
-    /// It allows to pass user data to the action to prevent capturing variables.
-    /// Depending on the actual collection implementation (i.e. <see cref="LargeArray{T}"/>) this may be significantly faster than iterating over all elements in a foreach-loop.
-    /// </summary>
-    /// <param name="action">The function that that will be called for each item of the collection.</param>
-    /// <param name="userData">The user data that will be passed to the action.</param>
-    /// <param name="offset">The <paramref name="offset"/> where the range starts.</param>
-    /// <param name="count">The <paramref name="count"/> of elements that belong to the range.</param>
-    void DoForEach<TUserData>(RefActionWithUserData<T, TUserData> action, long offset, long count, ref TUserData userData);
+    /// <typeparam name="TAction">A type implementing <see cref="ILargeRefAction{T}"/>.</typeparam>
+    /// <param name="action">The action instance passed by reference.</param>
+    /// <param name="offset">Optional starting offset. If null, starts from 0.</param>
+    /// <param name="count">Optional number of elements to process. If null, processes all remaining elements.</param>
+    void DoForEachRef<TAction>(ref TAction action, long? offset = null, long? count = null) where TAction : ILargeRefAction<T>;
 }
 
 public interface ILargeList<T> : ILargeArray<T>, ILargeCollection<T>
@@ -447,68 +613,29 @@ public interface ILargeList<T> : ILargeArray<T>, ILargeCollection<T>
     /// Removes the first occurance of an <paramref name="item"/> from the collection.
     /// </summary>
     /// <param name="item">The <paramref name="item"/> that shall be removed from the collection.</param>
-    /// <param name="preserveOrder">If set to false the order of items may change but the operation will be faster.</param>
-    /// <returns>true if the <paramref name="item"/> was found and removed. Otherwise false is returned.</returns>
-    bool Remove(T item, bool preserveOrder);
-
-    /// <summary>
-    /// Removes the first occurance of an <paramref name="item"/> from the collection.
-    /// </summary>
-    /// <param name="item">The <paramref name="item"/> that shall be removed from the collection.</param>
-    /// <param name="preserveOrder">If set to false the order of items may change but the operation will be faster.</param>
     /// <param name="removedItem">The removed item will be assigned if the <paramref name="item"/> was found. Otherwise the <see cref="default(T)"/> will be assigned.</param>
+    /// <param name="preserveOrder">If set to false the order of items may change but the operation will be faster. Defaults to true.</param>
     /// <returns>true if the <paramref name="item"/> was found and removed. Otherwise false is returned.</returns>
-    bool Remove(T item, bool preserveOrder, out T removedItem);
+    bool Remove(T item, out T removedItem, bool preserveOrder = true);
 
     /// <summary>
-    /// Removes the first occurance of an <paramref name="item"/> from the collection.
+    /// Removes the first occurance of an <paramref name="item"/> from the collection using a custom equality comparer.
     /// </summary>
-    /// <param name="item">The <paramref name="item"/> that shall be removed from the collection.</param>
-    /// <param name="equalsFunction">The function that defines how to compare items.</param>
-    /// <returns>true if the <paramref name="item"/> was found and removed. Otherwise false is returned.</returns>
-    bool Remove(T item, Func<T, T, bool> equalsFunction);
-
-    /// <summary>
-    /// Removes the first occurance of an <paramref name="item"/> from the collection.
-    /// </summary>
-    /// <param name="item">The <paramref name="item"/> that shall be removed from the collection.</param>
-    /// <param name="equalsFunction">The function that defines how to compare items.</param>
-    /// <returns>true if the <paramref name="item"/> was found and removed. Otherwise false is returned.</returns>
-    bool Remove(T item, bool preserveOrder, Func<T, T, bool> equalsFunction);
-
-    /// <summary>
-    /// Removes the first occurance of an <paramref name="item"/> from the collection.
-    /// </summary>
+    /// <typeparam name="TComparer">The type of the equality comparer.</typeparam>
     /// <param name="item">The <paramref name="item"/> that shall be removed from the collection.</param>
     /// <param name="removedItem">The removed item will be assigned if the <paramref name="item"/> was found. Otherwise the <see cref="default(T)"/> will be assigned.</param>
-    /// <param name="equalsFunction">The function that defines how to compare items.</param>
+    /// <param name="comparer">The equality comparer used to find the item.</param>
+    /// <param name="preserveOrder">If set to false the order of items may change but the operation will be faster. Defaults to true.</param>
     /// <returns>true if the <paramref name="item"/> was found and removed. Otherwise false is returned.</returns>
-    bool Remove(T item, out T removedItem, Func<T, T, bool> equalsFunction);
-
-    /// <summary>
-    /// Removes the first occurance of an <paramref name="item"/> from the collection.
-    /// </summary>
-    /// <param name="item">The <paramref name="item"/> that shall be removed from the collection.</param>
-    /// <param name="preserveOrder">If set to false the order of items may change but the operation will be faster.</param>
-    /// <param name="removedItem">The removed item will be assigned if the <paramref name="item"/> was found. Otherwise the <see cref="default(T)"/> will be assigned.</param>
-    /// <param name="equalsFunction">The function that defines how to compare items.</param>
-    /// <returns>true if the <paramref name="item"/> was found and removed. Otherwise false is returned.</returns>
-    bool Remove(T item, bool preserveOrder, out T removedItem, Func<T, T, bool> equalsFunction);
+    bool Remove<TComparer>(T item, out T removedItem, TComparer comparer, bool preserveOrder = true) where TComparer : IEqualityComparer<T>;
 
     /// <summary>
     /// Removes the item at the specified 0-based <paramref name="index"/> if <paramref name="index"/> is within the valid range.
     /// </summary>
     /// <param name="index">The 0-based <paramref name="index"/> of the location where the item shall be removed.</param>
+    /// <param name="preserveOrder">If set to false the order of items may change but the operation will be faster. Defaults to true.</param>
     /// <returns>The item which was located at the specified 0-based <paramref name="index"/> if <paramref name="index"/> was within the valid range.</returns>
-    T RemoveAt(long index);
-
-    /// <summary>
-    /// Removes the item at the specified 0-based <paramref name="index"/> if <paramref name="index"/> is within the valid range.
-    /// </summary>
-    /// <param name="index">The 0-based <paramref name="index"/> of the location where the item shall be removed.</param>
-    /// <param name="preserveOrder">If set to false the order of items may change but the operation will be faster.</param>
-    /// <returns>The item which was located at the specified 0-based <paramref name="index"/> if <paramref name="index"/> was within the valid range.</returns>
-    T RemoveAt(long index, bool preserveOrder);
+    T RemoveAt(long index, bool preserveOrder = true);
 }
 
 public interface IRefAccessLargeList<T> : ILargeList<T>, IRefAccessLargeArray<T>;

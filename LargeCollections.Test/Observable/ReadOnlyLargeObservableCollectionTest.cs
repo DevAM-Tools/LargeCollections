@@ -264,7 +264,7 @@ public class ReadOnlyLargeObservableCollectionTest
     {
         LargeObservableCollection<long> inner = CreateCollectionWithSequence(capacity, 400L);
         ReadOnlyLargeObservableCollection<long> readOnly = new(inner);
-        Func<long, long, int> comparer = static (l, r) => l.CompareTo(r);
+        DefaultComparer<long> comparer = new();
 
         long value = inner.Count > 0 ? inner[0] : 0L;
         await Assert.That(readOnly.BinarySearch(value, comparer)).IsEqualTo(inner.Count > 0 ? 0L : -1L);
@@ -282,7 +282,8 @@ public class ReadOnlyLargeObservableCollectionTest
         long value = inner.Count > 0 ? inner[0] : 0L;
 
         await Assert.That(readOnly.Contains(value)).IsEqualTo(inner.Count > 0);
-        await Assert.That(readOnly.Contains(value, static (l, r) => l == r)).IsEqualTo(inner.Count > 0);
+        DefaultEqualityComparer<long> eq1 = new();
+        await Assert.That(readOnly.Contains(value, ref eq1)).IsEqualTo(inner.Count > 0);
         await Assert.That(readOnly.Contains(value, 0L, inner.Count)).IsEqualTo(inner.Count > 0);
         await Assert.That(() => readOnly.Contains(value, -1L, 1L)).Throws<Exception>();
 
@@ -292,8 +293,11 @@ public class ReadOnlyLargeObservableCollectionTest
             return;
         }
 
-        await Assert.That(readOnly.Contains(value + 1, static (candidate, needle) => candidate + 1 == needle)).IsTrue();
-        await Assert.That(readOnly.Contains(value, static (candidate, needle) => candidate + 1 == needle)).IsFalse();
+        // Test custom comparer with offset logic - value + 1 == inner[0] + 1 matches inner[0]
+        DelegateEqualityComparer<long> offsetEq1 = new(static (candidate, needle) => candidate + 1 == needle, static x => x.GetHashCode());
+        await Assert.That(readOnly.Contains(value + 1, ref offsetEq1)).IsTrue();
+        DelegateEqualityComparer<long> offsetEq2 = new(static (candidate, needle) => candidate + 1 == needle, static x => x.GetHashCode());
+        await Assert.That(readOnly.Contains(value, ref offsetEq2)).IsFalse();
 
         if (inner.Count > 1)
         {
@@ -301,7 +305,8 @@ public class ReadOnlyLargeObservableCollectionTest
             long rangeCount = inner.Count - 1L;
             await Assert.That(readOnly.Contains(inner[1], offset, rangeCount)).IsTrue();
             await Assert.That(readOnly.Contains(inner[0], offset, rangeCount)).IsFalse();
-            await Assert.That(readOnly.Contains(inner[1] + 1, offset, rangeCount, static (candidate, needle) => candidate + 1 == needle)).IsTrue();
+            DelegateEqualityComparer<long> offsetEq3 = new(static (candidate, needle) => candidate + 1 == needle, static x => x.GetHashCode());
+            await Assert.That(readOnly.Contains(inner[1] + 1, ref offsetEq3, offset, rangeCount)).IsTrue();
         }
     }
 
@@ -395,15 +400,20 @@ public class ReadOnlyLargeObservableCollectionTest
 
         if (inner.Count > 0)
         {
-            Func<long, long, bool> offsetEquals = static (candidate, needle) => candidate + 1 == needle;
-            await Assert.That(readOnly.IndexOf(firstValue + 1, offsetEquals)).IsEqualTo(0L);
-            await Assert.That(readOnly.IndexOf(firstValue + 1, 0L, inner.Count, offsetEquals)).IsEqualTo(0L);
+            DelegateEqualityComparer<long> offsetEquals = new(static (candidate, needle) => candidate + 1 == needle, static x => x.GetHashCode());
+            await Assert.That(readOnly.IndexOf(firstValue + 1, ref offsetEquals)).IsEqualTo(0L);
+            DelegateEqualityComparer<long> offsetEquals2 = new(static (candidate, needle) => candidate + 1 == needle, static x => x.GetHashCode());
+            await Assert.That(readOnly.IndexOf(firstValue + 1, ref offsetEquals2, 0L, inner.Count)).IsEqualTo(0L);
 
-            await Assert.That(readOnly.LastIndexOf(lastValue + 1, offsetEquals)).IsEqualTo(inner.Count - 1L);
-            await Assert.That(readOnly.LastIndexOf(lastValue + 1, 0L, inner.Count, offsetEquals)).IsEqualTo(inner.Count - 1L);
+            DelegateEqualityComparer<long> offsetEquals3 = new(static (candidate, needle) => candidate + 1 == needle, static x => x.GetHashCode());
+            await Assert.That(readOnly.LastIndexOf(lastValue + 1, ref offsetEquals3)).IsEqualTo(inner.Count - 1L);
+            DelegateEqualityComparer<long> offsetEquals4 = new(static (candidate, needle) => candidate + 1 == needle, static x => x.GetHashCode());
+            await Assert.That(readOnly.LastIndexOf(lastValue + 1, ref offsetEquals4, 0L, inner.Count)).IsEqualTo(inner.Count - 1L);
             long unmatchedNeedle = lastValue + 2L;
-            await Assert.That(readOnly.IndexOf(unmatchedNeedle, offsetEquals)).IsEqualTo(-1L);
-            await Assert.That(readOnly.LastIndexOf(unmatchedNeedle, offsetEquals)).IsEqualTo(-1L);
+            DelegateEqualityComparer<long> offsetEquals5 = new(static (candidate, needle) => candidate + 1 == needle, static x => x.GetHashCode());
+            await Assert.That(readOnly.IndexOf(unmatchedNeedle, ref offsetEquals5)).IsEqualTo(-1L);
+            DelegateEqualityComparer<long> offsetEquals6 = new(static (candidate, needle) => candidate + 1 == needle, static x => x.GetHashCode());
+            await Assert.That(readOnly.LastIndexOf(unmatchedNeedle, ref offsetEquals6)).IsEqualTo(-1L);
         }
     }
 
@@ -424,13 +434,13 @@ public class ReadOnlyLargeObservableCollectionTest
         readOnly.DoForEach(item => rangeSum += item, offset, rangeCount);
         await Assert.That(rangeSum).IsEqualTo(inner.GetAll(offset, rangeCount).Sum());
 
-        long accumulator = 0L;
-        readOnly.DoForEach(static (long value, ref long acc) => acc += value, ref accumulator);
-        await Assert.That(accumulator).IsEqualTo(inner.GetAll().Sum());
+        SumAction sumAction = new ();
+        readOnly.DoForEach(ref sumAction);
+        await Assert.That(sumAction.Sum).IsEqualTo(inner.GetAll().Sum());
 
-        long rangeAccumulator = 0L;
-        readOnly.DoForEach(static (long value, ref long acc) => acc += value, offset, rangeCount, ref rangeAccumulator);
-        await Assert.That(rangeAccumulator).IsEqualTo(inner.GetAll(offset, rangeCount).Sum());
+        SumAction rangeSumAction = new ();
+        readOnly.DoForEach(ref rangeSumAction, offset, rangeCount);
+        await Assert.That(rangeSumAction.Sum).IsEqualTo(inner.GetAll(offset, rangeCount).Sum());
 
         await Assert.That(() => readOnly.DoForEach(_ => { }, -1L, 1L)).Throws<Exception>();
     }
@@ -475,6 +485,16 @@ public class ReadOnlyLargeObservableCollectionTest
             array[i] = start + i;
         }
         return array;
+    }
+
+    #endregion
+
+    #region Helper Structs
+
+    private struct SumAction : ILargeAction<long>
+    {
+        public long Sum;
+        public void Invoke(long item) => Sum += item;
     }
 
     #endregion

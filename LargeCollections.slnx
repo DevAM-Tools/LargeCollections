@@ -5,6 +5,7 @@
   <Folder Name="/Solution Items/">
     <File Path="README.md" />
   </Folder>
+  
   <Project Path="LargeCollections.DiskCache/LargeCollections.DiskCache.csproj"/>
   <Project Path="LargeCollections.Observable/LargeCollections.Observable.csproj"/>
   <Project Path="LargeCollections.Test/LargeCollections.Test.csproj"/>

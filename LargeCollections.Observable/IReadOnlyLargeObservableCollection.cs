@@ -39,4 +39,15 @@ public interface IReadOnlyLargeObservableCollection<T> :
     /// </summary>
     /// <returns>A disposable that resumes notifications when disposed</returns>
     IDisposable SuspendNotifications();
+
+    /// <summary>
+    /// High-performance event raised for any collection change.
+    /// Uses struct-based event args passed by reference to avoid allocations.
+    /// The event args contain all information about the change including:
+    /// - Action: The type of change (Add, Remove, Replace, Clear, Reset, RangeAdd)
+    /// - Index: The index at which the change occurred
+    /// - NewItem/OldItem: The items involved in the change
+    /// - Count/NewCount: Count information for the change
+    /// </summary>
+    event LargeCollectionChangedEventHandler<T> Changed;
 }

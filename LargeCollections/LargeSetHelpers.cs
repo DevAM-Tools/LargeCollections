@@ -31,22 +31,31 @@ using System.Runtime.CompilerServices;
 namespace LargeCollections;
 
 /// <summary>
-/// Internal helper class containing shared algorithms for hash-based collections (LargeSet and LargeDictionary)
+/// Internal helper class containing shared algorithms for hash-based collections (LargeSet and LargeDictionary).
+/// All methods use generic TComparer parameters to enable JIT devirtualization and inlining for optimal performance.
 /// </summary>
 internal static class LargeSetHelpers
 {
+    /// <summary>
+    /// Gets the bucket index using a struct equality comparer for optimal performance.
+    /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    internal static long GetBucketIndex<T>(T item, long capacity, Func<T, int> hashCodeFunction)
+    internal static long GetBucketIndex<T, TComparer>(ref T item, long capacity, ref TComparer comparer)
+        where TComparer : IEqualityComparer<T>
     {
-        ulong hash = unchecked((uint)hashCodeFunction.Invoke(item));
+        ulong hash = unchecked((uint)comparer.GetHashCode(item));
         long bucketIndex = (long)(hash % (ulong)capacity);
         return bucketIndex;
     }
 
+    /// <summary>
+    /// Adds an item to storage using a struct equality comparer for optimal performance.
+    /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    internal static void AddToStorage<T>(ref T item, SetElement<T>[][] storage, long capacity, ref long count, Func<T, T, bool> equalsFunction, Func<T, int> hashCodeFunction)
+    internal static void AddToStorage<T, TComparer>(ref T item, SetElement<T>[][] storage, long capacity, ref long count, ref TComparer comparer)
+        where TComparer : IEqualityComparer<T>
     {
-        long bucketIndex = GetBucketIndex(item, capacity, hashCodeFunction);
+        long bucketIndex = GetBucketIndex(ref item, capacity, ref comparer);
 
         SetElement<T> element = storage.StorageGet(bucketIndex);
 
@@ -59,7 +68,7 @@ internal static class LargeSetHelpers
 
         while (element is not null)
         {
-            if (equalsFunction.Invoke(item, element.Item))
+            if (comparer.Equals(item, element.Item))
             {
                 element.Item = item;
                 return;
@@ -76,16 +85,19 @@ internal static class LargeSetHelpers
         }
     }
 
+    /// <summary>
+    /// Tries to get an existing item or adds a new one using a struct equality comparer.
+    /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    internal static bool TryGetOrAddToStorage<T>(ref T searchItem, ref T valueIfNotFound, SetElement<T>[][] storage, long capacity, ref long count, Func<T, T, bool> equalsFunction, Func<T, int> hashCodeFunction, out T value)
+    internal static bool TryGetOrAddToStorage<T, TComparer>(ref T searchItem, ref T valueIfNotFound, SetElement<T>[][] storage, long capacity, ref long count, ref TComparer comparer, out T value)
+        where TComparer : IEqualityComparer<T>
     {
-        long bucketIndex = GetBucketIndex(searchItem, capacity, hashCodeFunction);
+        long bucketIndex = GetBucketIndex(ref searchItem, capacity, ref comparer);
 
         SetElement<T> element = storage.StorageGet(bucketIndex);
 
         if (element is null)
         {
-            // Item not found, add valueIfNotFound
             storage.StorageSet(bucketIndex, new SetElement<T>(valueIfNotFound));
             count++;
             value = valueIfNotFound;
@@ -94,16 +106,14 @@ internal static class LargeSetHelpers
 
         while (element is not null)
         {
-            if (equalsFunction.Invoke(searchItem, element.Item))
+            if (comparer.Equals(searchItem, element.Item))
             {
-                // Item found, return existing value
                 value = element.Item;
                 return true;
             }
 
             if (element.NextElement is null)
             {
-                // Item not found, add valueIfNotFound to the chain
                 element.NextElement = new SetElement<T>(valueIfNotFound);
                 count++;
                 value = valueIfNotFound;
@@ -113,15 +123,18 @@ internal static class LargeSetHelpers
             element = element.NextElement;
         }
 
-        // Should never reach here
         value = default;
         return false;
     }
 
+    /// <summary>
+    /// Tries to get an existing item or adds a new one created by factory using a struct equality comparer.
+    /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    internal static bool TryGetOrAddToStorageWithFactory<T>(T searchItem, Func<T> valueFactory, SetElement<T>[][] storage, long capacity, ref long count, Func<T, T, bool> equalsFunction, Func<T, int> hashCodeFunction, out T value)
+    internal static bool TryGetOrAddToStorageWithFactory<T, TComparer>(ref T searchItem, Func<T> valueFactory, SetElement<T>[][] storage, long capacity, ref long count, ref TComparer comparer, out T value)
+        where TComparer : IEqualityComparer<T>
     {
-        long bucketIndex = GetBucketIndex(searchItem, capacity, hashCodeFunction);
+        long bucketIndex = GetBucketIndex(ref searchItem, capacity, ref comparer);
 
         SetElement<T> element = storage.StorageGet(bucketIndex);
 
@@ -137,7 +150,7 @@ internal static class LargeSetHelpers
 
         while (element is not null)
         {
-            if (equalsFunction.Invoke(searchItem, element.Item))
+            if (comparer.Equals(searchItem, element.Item))
             {
                 // Item found, return existing value
                 value = element.Item;
@@ -162,19 +175,80 @@ internal static class LargeSetHelpers
         return false;
     }
 
+    /// <summary>
+    /// Gets an item from storage using a struct equality comparer for optimal performance.
+    /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    internal static bool RemoveFromStorage<T>(T item, SetElement<T>[][] storage, ref long count, long capacity, Func<T, T, bool> equalsFunction, Func<T, int> hashCodeFunction, out T removedItem)
+    internal static bool TryGetValueFromStorage<T, TComparer>(ref T searchItem, SetElement<T>[][] storage, long capacity, ref TComparer comparer, out T value)
+        where TComparer : IEqualityComparer<T>
     {
-        removedItem = default;
+        long bucketIndex = GetBucketIndex(ref searchItem, capacity, ref comparer);
 
-        long bucketIndex = GetBucketIndex(item, capacity, hashCodeFunction);
+        SetElement<T> element = storage.StorageGet(bucketIndex);
+
+        while (element is not null)
+        {
+            if (comparer.Equals(searchItem, element.Item))
+            {
+                value = element.Item;
+                return true;
+            }
+
+            element = element.NextElement;
+        }
+
+        value = default;
+        return false;
+    }
+
+    /// <summary>
+    /// Gets a reference to an item from storage using a struct equality comparer.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal static ref T GetRefFromStorage<T, TComparer>(ref T searchItem, SetElement<T>[][] storage, long capacity, ref TComparer comparer)
+        where TComparer : IEqualityComparer<T>
+    {
+        long bucketIndex = GetBucketIndex(ref searchItem, capacity, ref comparer);
+
+        SetElement<T> element = storage.StorageGet(bucketIndex);
+
+        while (element is not null)
+        {
+            if (comparer.Equals(searchItem, element.Item))
+            {
+                return ref element.Item;
+            }
+            element = element.NextElement;
+        }
+
+        throw new KeyNotFoundException($"The given item was not found in the storage.");
+    }
+
+    /// <summary>
+    /// Checks if storage contains an item using a struct equality comparer.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal static bool ContainsInStorage<T, TComparer>(ref T searchItem, SetElement<T>[][] storage, long capacity, ref TComparer comparer)
+        where TComparer : IEqualityComparer<T>
+    {
+        return TryGetValueFromStorage(ref searchItem, storage, capacity, ref comparer, out _);
+    }
+
+    /// <summary>
+    /// Removes an item from storage using a struct equality comparer.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal static bool RemoveFromStorage<T, TComparer>(ref T searchItem, SetElement<T>[][] storage, long capacity, ref long count, ref TComparer comparer, out T removedItem)
+        where TComparer : IEqualityComparer<T>
+    {
+        long bucketIndex = GetBucketIndex(ref searchItem, capacity, ref comparer);
 
         SetElement<T> element = storage.StorageGet(bucketIndex);
         SetElement<T> previousElement = null;
 
         while (element is not null)
         {
-            if (equalsFunction.Invoke(item, element.Item))
+            if (comparer.Equals(searchItem, element.Item))
             {
                 removedItem = element.Item;
                 element.Item = default;
@@ -203,80 +277,30 @@ internal static class LargeSetHelpers
             element = element.NextElement;
         }
 
+        removedItem = default;
         return false;
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal static void ClearStorage<T>(SetElement<T>[][] storage, long capacity, ref long count)
     {
-
-        for (long i = 0L; i < capacity; i++)
+        // Use bulk Array.Clear for each segment instead of per-element clearing
+        // This is significantly faster for large capacities
+        for (int i = 0; i < storage.Length; i++)
         {
-            SetElement<T> element = storage.StorageGet(i);
-
-            while (element is not null)
+            SetElement<T>[] segment = storage[i];
+            if (segment != null)
             {
-                element.Item = default;
-
-                SetElement<T> nextElement = element.NextElement;
-                element.NextElement = null;
-                element = nextElement;
+                Array.Clear(segment, 0, segment.Length);
             }
-
-            storage.StorageSet(i, null);
         }
 
         count = 0L;
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    internal static bool TryGetValueFromStorage<T>(T item, SetElement<T>[][] storage, long capacity, Func<T, T, bool> equalsFunction, Func<T, int> hashCodeFunction, out T value)
-    {
-        long bucketIndex = GetBucketIndex(item, capacity, hashCodeFunction);
-
-        SetElement<T> element = storage.StorageGet(bucketIndex);
-
-        while (element is not null)
-        {
-            if (equalsFunction.Invoke(item, element.Item))
-            {
-                value = element.Item;
-                return true;
-            }
-            element = element.NextElement;
-        }
-
-        value = default;
-        return false;
-    }
-
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    internal static ref T GetRefFromStorage<T>(T item, SetElement<T>[][] storage, long capacity, Func<T, T, bool> equalsFunction, Func<T, int> hashCodeFunction)
-    {
-        long bucketIndex = GetBucketIndex(item, capacity, hashCodeFunction);
-
-        SetElement<T> element = storage.StorageGet(bucketIndex);
-
-        while (element is not null)
-        {
-            if (equalsFunction.Invoke(item, element.Item))
-            {
-                return ref element.Item;
-            }
-            element = element.NextElement;
-        }
-
-        throw new KeyNotFoundException($"The given item was not found in the storage.");
-    }
-
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    internal static bool ContainsInStorage<T>(T item, SetElement<T>[][] storage, long capacity, Func<T, T, bool> equalsFunction, Func<T, int> hashCodeFunction)
-    {
-        return TryGetValueFromStorage(item, storage, capacity, equalsFunction, hashCodeFunction, out _);
-    }
-
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    internal static void CopyStorage<T>(SetElement<T>[][] sourceStorage, long sourceCapacity, SetElement<T>[][] targetStorage, long targetCapacity, ref long targetCount, Func<T, T, bool> equalsFunction, Func<T, int> hashCodeFunction, bool clearSourceStorage)
+    internal static void CopyStorage<T, TComparer>(SetElement<T>[][] sourceStorage, long sourceCapacity, SetElement<T>[][] targetStorage, long targetCapacity, ref long targetCount, ref TComparer comparer, bool clearSourceStorage)
+        where TComparer : IEqualityComparer<T>
     {
         for (long i = 0L; i < sourceCapacity; i++)
         {
@@ -284,7 +308,7 @@ internal static class LargeSetHelpers
 
             while (element is not null)
             {
-                AddToStorage(ref element.Item, targetStorage, targetCapacity, ref targetCount, equalsFunction, hashCodeFunction);
+                AddToStorage(ref element.Item, targetStorage, targetCapacity, ref targetCount, ref comparer);
 
                 SetElement<T> nextElement = element.NextElement;
                 if (clearSourceStorage)
@@ -304,7 +328,6 @@ internal static class LargeSetHelpers
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal static IEnumerable<T> GetAllFromStorage<T>(SetElement<T>[][] storage, long capacity)
     {
-
         for (long i = 0L; i < capacity; i++)
         {
             SetElement<T> element = storage.StorageGet(i);
@@ -339,13 +362,8 @@ internal static class LargeSetHelpers
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    internal static void DoForEachInStorage<T, TUserData>(SetElement<T>[][] storage, long capacity, ActionWithUserData<T, TUserData> action, ref TUserData userData)
+    internal static void DoForEachInStorage<T, TAction>(SetElement<T>[][] storage, long capacity, ref TAction action) where TAction : ILargeAction<T>
     {
-        if (action is null)
-        {
-            throw new ArgumentNullException(nameof(action));
-        }
-
         for (long i = 0L; i < capacity; i++)
         {
             SetElement<T> element = storage.StorageGet(i);
@@ -353,14 +371,15 @@ internal static class LargeSetHelpers
             while (element is not null)
             {
                 ref T item = ref element.Item;
-                action.Invoke(item, ref userData);
+                action.Invoke(item);
                 element = element.NextElement;
             }
         }
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    internal static void ExtendStorage<T>(ref SetElement<T>[][] storage, ref long capacity, ref long count, double capacityGrowFactor, long fixedCapacityGrowAmount, long fixedCapacityGrowLimit, double maxLoadFactor, Func<T, T, bool> equalsFunction, Func<T, int> hashCodeFunction)
+    internal static void ExtendStorage<T, TComparer>(ref SetElement<T>[][] storage, ref long capacity, ref long count, double capacityGrowFactor, long fixedCapacityGrowAmount, long fixedCapacityGrowLimit, double maxLoadFactor, ref TComparer comparer)
+        where TComparer : IEqualityComparer<T>
     {
         double loadFactor = (double)count / capacity;
 
@@ -392,7 +411,7 @@ internal static class LargeSetHelpers
 
         SetElement<T>[][] newStorage = StorageExtensions.StorageCreate<SetElement<T>>(newCapacity);
         long newStorageCount = 0L;
-        CopyStorage(storage, capacity, newStorage, newCapacity, ref newStorageCount, equalsFunction, hashCodeFunction, true);
+        CopyStorage(storage, capacity, newStorage, newCapacity, ref newStorageCount, ref comparer, true);
 
         storage = newStorage;
         capacity = newCapacity;
@@ -400,7 +419,8 @@ internal static class LargeSetHelpers
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    internal static void ShrinkStorage<T>(ref SetElement<T>[][] storage, ref long capacity, ref long count, double minLoadFactor, double minLoadFactorTolerance, Func<T, T, bool> equalsFunction, Func<T, int> hashCodeFunction)
+    internal static void ShrinkStorage<T, TComparer>(ref SetElement<T>[][] storage, ref long capacity, ref long count, double minLoadFactor, double minLoadFactorTolerance, ref TComparer comparer)
+        where TComparer : IEqualityComparer<T>
     {
         double loadFactor = (double)count / capacity;
 
@@ -414,7 +434,7 @@ internal static class LargeSetHelpers
 
         SetElement<T>[][] newStorage = StorageExtensions.StorageCreate<SetElement<T>>(newCapacity);
         long newStorageCount = 0L;
-        CopyStorage(storage, capacity, newStorage, newCapacity, ref newStorageCount, equalsFunction, hashCodeFunction, true);
+        CopyStorage(storage, capacity, newStorage, newCapacity, ref newStorageCount, ref comparer, true);
 
         storage = newStorage;
         capacity = newCapacity;

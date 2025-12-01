@@ -11,8 +11,8 @@
   <ItemGroup>
     <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.0" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.0.1" />
-    <PackageReference Include="TUnit" Version="1.0.78" />
-    <PackageReference Include="TUnit.Assertions" Version="1.0.78" />
+    <PackageReference Include="TUnit" Version="1.2.11" />
+    <PackageReference Include="TUnit.Assertions" Version="1.2.11" />
     <PackageReference Include="coverlet.collector" Version="6.0.4">
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
@@ -26,6 +26,8 @@
 	  <Compile Include="..\LargeCollections.DiskCache\*.cs" />
 	  <Compile Include="..\LargeCollections.DiskCache\Interfaces\*.cs" />
 	  <Compile Include="..\LargeCollections.Observable\*.cs" />
+	  <Compile Include="..\LargeCollections.Observable\Interfaces\*.cs" />
+	  <Compile Include="..\LargeCollections.Observable\Views\*.cs" />
   </ItemGroup>
 
 </Project>

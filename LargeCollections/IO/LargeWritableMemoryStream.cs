@@ -32,11 +32,15 @@ using System.Runtime.CompilerServices;
 namespace LargeCollections.IO;
 
 /// <summary>
-/// A slim writeonly non seekable wrapper for <see cref="Stream"/> APIs for <see cref="LargeList{byte}"/>.
+/// A slim writeonly seekable wrapper for <see cref="Stream"/> APIs for <see cref="LargeList{byte}"/>.
+/// Supports seeking within the current length. Writing at a position overwrites existing data,
+/// and any excess data is appended to the end.
 /// </summary>
-[DebuggerDisplay("LargeWritableMemoryStream: Length = {Length}")]
+[DebuggerDisplay("LargeWritableMemoryStream: Position = {Position}, Length = {Length}")]
 public class LargeWritableMemoryStream : Stream
 {
+    private long _position;
+
     public LargeWritableMemoryStream()
     {
         Storage = [];
@@ -68,7 +72,7 @@ public class LargeWritableMemoryStream : Stream
     public override bool CanSeek
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        get => false;
+        get => true;
     }
 
     public override bool CanWrite
@@ -86,9 +90,16 @@ public class LargeWritableMemoryStream : Stream
     public override long Position
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        get => Length;
+        get => _position;
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        set => throw new NotSupportedException();
+        set
+        {
+            if (value < 0 || value > Length)
+            {
+                throw new ArgumentOutOfRangeException(nameof(value), "Position must be within the bounds of the stream (0 to Length).");
+            }
+            _position = value;
+        }
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -105,7 +116,14 @@ public class LargeWritableMemoryStream : Stream
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public override long Seek(long offset, SeekOrigin origin)
     {
-        throw new NotSupportedException();
+        Position = origin switch
+        {
+            SeekOrigin.Begin => offset,
+            SeekOrigin.Current => _position + offset,
+            SeekOrigin.End => Length + offset,
+            _ => _position,
+        };
+        return _position;
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -115,67 +133,131 @@ public class LargeWritableMemoryStream : Stream
     }
 
     /// <summary>
-    /// Writes the entire contents of the given buffer to the stream.
+    /// Writes bytes from the given buffer to the stream at the current position.
+    /// Overwrites existing data and appends any excess.
     /// </summary>
     /// <param name="buffer">The buffer to write from.</param>
+    /// <param name="offset">The zero-based byte offset in <paramref name="buffer"/> at which to begin copying bytes to the stream.</param>
+    /// <param name="count">The number of bytes to write to the stream. If null, writes all remaining bytes from <paramref name="offset"/>.</param>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public void Write(IReadOnlyLargeArray<byte> buffer)
+    public void Write(IReadOnlyLargeArray<byte> buffer, long offset = 0L, long? count = null)
     {
         if (buffer is null)
         {
             throw new ArgumentNullException(nameof(buffer));
         }
-        Storage.AddRange(buffer);
-    }
 
-    /// <summary>
-    /// Writes a portion of the given buffer to the stream.
-    /// </summary>
-    /// <param name="buffer">The buffer to write from.</param>
-    /// <param name="offset">The zero-based byte offset in <paramref name="buffer"/> at which to begin copying bytes to the stream.</param>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public void Write(IReadOnlyLargeArray<byte> buffer, long offset)
-    {
-        if (buffer is null)
+        long actualCount = count ?? (buffer.Count - offset);
+        StorageExtensions.CheckRange(offset, actualCount, buffer.Count);
+
+        if (actualCount == 0L)
         {
-            throw new ArgumentNullException(nameof(buffer));
+            return;
         }
-        Storage.AddRange(buffer, offset);
+
+        long overwriteCount = Math.Min(actualCount, Length - _position);
+        if (overwriteCount > 0L)
+        {
+            // Overwrite existing data
+            Storage.CopyFrom(buffer, offset, _position, overwriteCount);
+        }
+
+        long appendCount = actualCount - overwriteCount;
+        if (appendCount > 0L)
+        {
+            // Append remaining data
+            Storage.AddRange(buffer, offset + overwriteCount, appendCount);
+        }
+
+        _position += actualCount;
     }
 
     /// <summary>
-    /// Writes a portion of the given buffer to the stream.
-    /// </summary>
-    /// <param name="buffer">The buffer to write from.</param>
-    /// <param name="offset">The zero-based byte offset in <paramref name="buffer"/> at which to begin copying bytes to the stream.</param>
-    /// <param name="count">The number of bytes to write to the stream.</param>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public void Write(IReadOnlyLargeArray<byte> buffer, long offset, long count)
-    {
-        Storage.AddRange(buffer, offset, count);
-    }
-
-    /// <summary>
-    /// Writes the entire contents of the given buffer to the stream.
+    /// Writes the entire contents of the given buffer to the stream at the current position.
+    /// Overwrites existing data and appends any excess.
     /// </summary>
     /// <param name="buffer">The buffer to write from.</param>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void Write(ReadOnlyLargeSpan<byte> buffer)
     {
-        Storage.AddRange(buffer);
+        if (buffer.Count == 0L)
+        {
+            return;
+        }
+
+        long overwriteCount = Math.Min(buffer.Count, Length - _position);
+        if (overwriteCount > 0L)
+        {
+            // Overwrite existing data
+            Storage.CopyFrom(buffer.Slice(0L, overwriteCount), _position, overwriteCount);
+        }
+
+        long appendCount = buffer.Count - overwriteCount;
+        if (appendCount > 0L)
+        {
+            // Append remaining data
+            Storage.AddRange(buffer.Slice(overwriteCount, appendCount));
+        }
+
+        _position += buffer.Count;
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public override void Write(byte[] buffer, int offset, int count)
     {
-        Storage.AddRange(buffer, offset, count);
+        if (buffer is null)
+        {
+            throw new ArgumentNullException(nameof(buffer));
+        }
+
+        StorageExtensions.CheckRange(offset, count, buffer.Length);
+
+        if (count == 0)
+        {
+            return;
+        }
+
+        long overwriteCount = Math.Min(count, Length - _position);
+        if (overwriteCount > 0L)
+        {
+            // Overwrite existing data
+            Storage.CopyFromArray(buffer, offset, _position, (int)overwriteCount);
+        }
+
+        long appendCount = count - overwriteCount;
+        if (appendCount > 0L)
+        {
+            // Append remaining data
+            Storage.AddRange(buffer, offset + (int)overwriteCount, (int)appendCount);
+        }
+
+        _position += count;
     }
 
 #if NETSTANDARD2_1_OR_GREATER || NETCOREAPP3_0_OR_GREATER || NET5_0_OR_GREATER
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public override void Write(ReadOnlySpan<byte> source)
     {
-        Storage.AddRange(source);
+        if (source.Length == 0)
+        {
+            return;
+        }
+
+        long overwriteCount = Math.Min(source.Length, Length - _position);
+        if (overwriteCount > 0L)
+        {
+            // Overwrite existing data
+            Storage.CopyFromSpan(source.Slice(0, (int)overwriteCount), _position, (int)overwriteCount);
+        }
+
+        int appendCount = source.Length - (int)overwriteCount;
+        if (appendCount > 0)
+        {
+            // Append remaining data
+            Storage.AddRange(source.Slice((int)overwriteCount, appendCount));
+        }
+
+        _position += source.Length;
     }
 #endif
 }

@@ -1,4 +1,4 @@
-﻿/*
+/*
 MIT License
 SPDX-License-Identifier: MIT
 
@@ -1211,6 +1211,14 @@ public class DiskCache<TKey, TValue> : IDiskCache<TKey, TValue>, IDisposable whe
         return index;
     }
 
+    #region DoForEach Methods
+
+    /// <summary>
+    /// Performs the <paramref name="action"/> with key-value pairs of the cache.
+    /// Note: offset and count parameters are not supported for hash-based caches 
+    /// since elements have no defined order.
+    /// </summary>
+    /// <param name="action">The function that will be called for each key-value pair.</param>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void DoForEach(Action<KeyValuePair<TKey, TValue>> action)
     {
@@ -1225,17 +1233,21 @@ public class DiskCache<TKey, TValue> : IDiskCache<TKey, TValue>, IDisposable whe
         }
     }
 
+    /// <summary>
+    /// Performs the action on key-value pairs using an action for optimal performance.
+    /// Note: offset and count parameters are not supported for hash-based caches 
+    /// since elements have no defined order.
+    /// </summary>
+    /// <typeparam name="TAction">A type implementing <see cref="ILargeAction{KeyValuePair{TKey, TValue}}"/>.</typeparam>
+    /// <param name="action">The action instance passed by reference.</param>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public void DoForEach<TUserData>(ActionWithUserData<KeyValuePair<TKey, TValue>, TUserData> action, ref TUserData userData)
+    public void DoForEach<TAction>(ref TAction action) where TAction : ILargeAction<KeyValuePair<TKey, TValue>>
     {
-        if (action is null)
-        {
-            throw new ArgumentNullException(nameof(action));
-        }
-
         foreach (KeyValuePair<TKey, TValue> item in GetAll())
         {
-            action.Invoke(item, ref userData);
+            action.Invoke(item);
         }
     }
+
+    #endregion
 }
