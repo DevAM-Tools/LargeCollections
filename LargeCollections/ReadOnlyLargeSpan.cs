@@ -418,10 +418,19 @@ public readonly struct ReadOnlyLargeSpan<T> : IReadOnlyLargeArray<T>
         return inner.GetAll(_Start, _Count);
     }
 
+    /// <summary>
+    /// Returns a high-performance struct enumerator for efficient iteration.
+    /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public IEnumerator<T> GetEnumerator()
+    public ReadOnlyLargeSpanEnumerator<T> GetEnumerator()
     {
-        return GetAll().GetEnumerator();
+        return new ReadOnlyLargeSpanEnumerator<T>(EnsureInner(), _Start, _Count);
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    IEnumerator<T> IEnumerable<T>.GetEnumerator()
+    {
+        return new ReadOnlyLargeSpanEnumerator<T>(EnsureInner(), _Start, _Count);
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -505,6 +514,128 @@ public readonly struct ReadOnlyLargeSpan<T> : IReadOnlyLargeArray<T>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     IEnumerator IEnumerable.GetEnumerator()
     {
-        return GetAll().GetEnumerator();
+        return new ReadOnlyLargeSpanEnumerator<T>(EnsureInner(), _Start, _Count);
+    }
+}
+
+/// <summary>
+/// High-performance struct enumerator for ReadOnlyLargeSpan.
+/// Uses direct storage access when available, falls back to indexed access otherwise.
+/// </summary>
+/// <typeparam name="T">The element type.</typeparam>
+public struct ReadOnlyLargeSpanEnumerator<T> : IEnumerator<T>
+{
+    private readonly IReadOnlyLargeArray<T> _inner;
+    private readonly long _start;
+    private readonly long _count;
+    private long _index;
+    private T _current;
+
+    // Optimized path: direct storage access
+    private readonly T[][] _storage;
+    private int _storageIndex;
+    private int _itemIndex;
+    private int _currentChunkLength;
+    private T[] _currentChunk;
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal ReadOnlyLargeSpanEnumerator(IReadOnlyLargeArray<T> inner, long start, long count)
+    {
+        _inner = inner;
+        _start = start;
+        _count = count;
+        _index = -1;
+        _current = default!;
+
+        // Try to get direct storage access for optimal performance
+        if (inner is LargeArray<T> largeArray)
+        {
+            _storage = largeArray.GetStorage();
+        }
+        else if (inner is LargeList<T> largeList)
+        {
+            _storage = largeList.GetStorage();
+        }
+        else
+        {
+            _storage = null!;
+        }
+
+        if (_storage != null && count > 0)
+        {
+            (int storageIndex, int itemIndex) = StorageExtensions.StorageGetIndex(start);
+            _storageIndex = storageIndex;
+            _itemIndex = itemIndex - 1; // Will be incremented in MoveNext
+            _currentChunk = _storage[storageIndex];
+            _currentChunkLength = _currentChunk.Length;
+        }
+        else
+        {
+            _storageIndex = 0;
+            _itemIndex = -1;
+            _currentChunk = null!;
+            _currentChunkLength = 0;
+        }
+    }
+
+    /// <inheritdoc/>
+    public readonly T Current
+    {
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        get => _current;
+    }
+
+    /// <inheritdoc/>
+    readonly object System.Collections.IEnumerator.Current => _current!;
+
+    /// <inheritdoc/>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public bool MoveNext()
+    {
+        _index++;
+        if (_index >= _count)
+        {
+            return false;
+        }
+
+        // Optimized path: direct storage access
+        if (_storage != null)
+        {
+            _itemIndex++;
+
+            // Check if we need to move to the next chunk
+            if (_itemIndex >= _currentChunkLength)
+            {
+                _storageIndex++;
+                if (_storageIndex >= _storage.Length)
+                {
+                    return false;
+                }
+                _currentChunk = _storage[_storageIndex];
+                _currentChunkLength = _currentChunk.Length;
+                _itemIndex = 0;
+            }
+
+            _current = _currentChunk[_itemIndex];
+        }
+        else
+        {
+            // Fallback: use interface indexed access
+            _current = _inner[_start + _index];
+        }
+
+        return true;
+    }
+
+    /// <inheritdoc/>
+    public void Reset()
+    {
+        throw new NotSupportedException();
+    }
+
+    /// <inheritdoc/>
+    public readonly void Dispose()
+    {
+        // Nothing to dispose
     }
 }

@@ -466,7 +466,6 @@ public class LargeLinkedList<T> : ILargeCollection<T>
     /// <summary>
     /// Finds the first node containing the specified value
     /// </summary>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public Node Find(T value, Func<T, T, bool> equalsFunction = null)
     {
         equalsFunction ??= DefaultFunctions<T>.DefaultEqualsFunction;
@@ -487,7 +486,6 @@ public class LargeLinkedList<T> : ILargeCollection<T>
     /// <summary>
     /// Finds the last node containing the specified value
     /// </summary>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public Node FindLast(T value, Func<T, T, bool> equalsFunction = null)
     {
         equalsFunction ??= DefaultFunctions<T>.DefaultEqualsFunction;
@@ -539,7 +537,6 @@ public class LargeLinkedList<T> : ILargeCollection<T>
     /// Performs the <paramref name="action"/> with items of the linked list.
     /// </summary>
     /// <param name="action">The function that will be called for each item.</param>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void DoForEach(Action<T> action)
     {
         if (action is null)
@@ -560,7 +557,6 @@ public class LargeLinkedList<T> : ILargeCollection<T>
     /// </summary>
     /// <typeparam name="TAction">A type implementing <see cref="ILargeAction{T}"/>.</typeparam>
     /// <param name="action">The action instance passed by reference.</param>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void DoForEach<TAction>(ref TAction action) where TAction : ILargeAction<T>
     {
         Node current = _Head;
@@ -573,7 +569,6 @@ public class LargeLinkedList<T> : ILargeCollection<T>
 
     #endregion
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public IEnumerable<T> GetAll()
     {
         Node current = _Head;

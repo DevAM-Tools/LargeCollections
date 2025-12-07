@@ -719,4 +719,82 @@ public interface ILargeDictionary<TKey, TValue> : IReadOnlyLargeDictionary<TKey,
     bool Remove(TKey key, out TValue removedValue);
 }
 
+#region Point Accessor Interfaces for Spatial Data Structures
+
+/// <summary>
+/// High-performance interface for accessing point coordinates in spatial data structures.
+/// Using struct implementations enables JIT devirtualization and inlining for optimal performance.
+/// </summary>
+/// <typeparam name="T">The point type.</typeparam>
+/// <example>
+/// <code>
+/// public readonly struct Point2DAccessor : IPointAccessor&lt;(double X, double Y)&gt;
+/// {
+///     public int Dimensions =&gt; 2;
+///     public double GetCoordinate((double X, double Y) point, int dimension) =&gt; dimension == 0 ? point.X : point.Y;
+///     public double DistanceSquared((double X, double Y) a, (double X, double Y) b)
+///     {
+///         double dx = a.X - b.X;
+///         double dy = a.Y - b.Y;
+///         return dx * dx + dy * dy;
+///     }
+/// }
+/// </code>
+/// </example>
+public interface IPointAccessor<T>
+{
+    /// <summary>
+    /// Gets the number of dimensions of the point type.
+    /// </summary>
+    int Dimensions { get; }
+
+    /// <summary>
+    /// Gets the coordinate value at the specified dimension.
+    /// </summary>
+    /// <param name="point">The point to get the coordinate from.</param>
+    /// <param name="dimension">The 0-based dimension index.</param>
+    /// <returns>The coordinate value at the specified dimension.</returns>
+    double GetCoordinate(T point, int dimension);
+}
+
+/// <summary>
+/// Wrapper that adapts a delegate to the <see cref="IPointAccessor{T}"/> interface.
+/// Use this when you have an existing delegate but want to use the generic accessor overloads.
+/// Note: This wrapper has the same performance as direct delegate usage.
+/// </summary>
+/// <typeparam name="T">The point type.</typeparam>
+public readonly struct DelegatePointAccessor<T> : IPointAccessor<T>
+{
+    private readonly int _dimensions;
+    private readonly Func<T, int, double> _getCoordinate;
+
+    /// <summary>
+    /// Creates a new delegate wrapper point accessor.
+    /// </summary>
+    /// <param name="dimensions">The number of dimensions.</param>
+    /// <param name="getCoordinate">The coordinate accessor delegate.</param>
+    public DelegatePointAccessor(int dimensions, Func<T, int, double> getCoordinate)
+    {
+        if (dimensions < 1)
+        {
+            throw new ArgumentOutOfRangeException(nameof(dimensions), "Dimensions must be at least 1.");
+        }
+        _dimensions = dimensions;
+        _getCoordinate = getCoordinate ?? throw new ArgumentNullException(nameof(getCoordinate));
+    }
+
+    /// <inheritdoc/>
+    public int Dimensions
+    {
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        get => _dimensions;
+    }
+
+    /// <inheritdoc/>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public double GetCoordinate(T point, int dimension) => _getCoordinate(point, dimension);
+}
+
+#endregion
+
 

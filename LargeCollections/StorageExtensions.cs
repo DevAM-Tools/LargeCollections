@@ -24,6 +24,7 @@ SOFTWARE.
 */
 
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.IO;
 using System.Runtime.CompilerServices;
@@ -190,7 +191,8 @@ public static class StorageExtensions
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal static ref T StorageGetRef<T>(this T[][] array, long index)
     {
-        (int storageIndex, int itemIndex) = StorageGetIndex(index);
+        int storageIndex = (int)(index >> Constants.StorageIndexShiftAmount);
+        int itemIndex = (int)(index & (Constants.MaxStorageCapacity - 1L));
 
         return ref array[storageIndex][itemIndex];
     }
@@ -198,22 +200,22 @@ public static class StorageExtensions
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal static T StorageGet<T>(this T[][] array, long index)
     {
-        (int storageIndex, int itemIndex) = StorageGetIndex(index);
+        int storageIndex = (int)(index >> Constants.StorageIndexShiftAmount);
+        int itemIndex = (int)(index & (Constants.MaxStorageCapacity - 1L));
 
-        T result = array[storageIndex][itemIndex];
-        return result;
+        return array[storageIndex][itemIndex];
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal static T StorageSet<T>(this T[][] array, long index, in T value)
     {
-        (int storageIndex, int itemIndex) = StorageGetIndex(index);
+        int storageIndex = (int)(index >> Constants.StorageIndexShiftAmount);
+        int itemIndex = (int)(index & (Constants.MaxStorageCapacity - 1L));
 
         array[storageIndex][itemIndex] = value;
         return value;
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal static IEnumerable<T> StorageGetAll<T>(this T[][] array, long offset, long count)
     {
         if (count == 0L)
@@ -256,6 +258,25 @@ public static class StorageExtensions
                 currentCount++;
             }
         }
+    }
+
+    /// <summary>
+    /// Creates a high-performance struct enumerator for the storage.
+    /// This avoids the overhead of yield-based enumeration and enables better JIT optimization.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal static LargeStorageEnumerator<T> GetStructEnumerator<T>(this T[][] storage, long offset, long count)
+    {
+        return new LargeStorageEnumerator<T>(storage, offset, count);
+    }
+
+    /// <summary>
+    /// Creates a high-performance enumerable wrapper for the storage.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal static LargeStorageEnumerable<T> AsStructEnumerable<T>(this T[][] storage, long offset, long count)
+    {
+        return new LargeStorageEnumerable<T>(storage, offset, count);
     }
 
     internal delegate void DoForEachAction<T, TUserData, TInternal>(ref T item, ref TUserData userData, ref TInternal internalData);
@@ -397,9 +418,10 @@ public static class StorageExtensions
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal static void StorageSwap<T>(this T[][] array, long leftIndex, long rightIndex)
     {
-        // Optimized: direct array access instead of 4 method calls
-        (int leftStorageIndex, int leftItemIndex) = StorageGetIndex(leftIndex);
-        (int rightStorageIndex, int rightItemIndex) = StorageGetIndex(rightIndex);
+        int leftStorageIndex = (int)(leftIndex >> Constants.StorageIndexShiftAmount);
+        int leftItemIndex = (int)(leftIndex & (Constants.MaxStorageCapacity - 1L));
+        int rightStorageIndex = (int)(rightIndex >> Constants.StorageIndexShiftAmount);
+        int rightItemIndex = (int)(rightIndex & (Constants.MaxStorageCapacity - 1L));
 
         T[] leftStorage = array[leftStorageIndex];
         T[] rightStorage = array[rightStorageIndex];
@@ -1725,4 +1747,127 @@ public static class StorageExtensions
 
         return currentCount;
     }
+}
+
+/// <summary>
+/// High-performance struct enumerator for 2D storage arrays.
+/// Iterates chunk-by-chunk to minimize index calculations and enable JIT optimizations.
+/// </summary>
+/// <typeparam name="T">The element type.</typeparam>
+public struct LargeStorageEnumerator<T> : IEnumerator<T>
+{
+    private readonly T[][] _storage;
+    private int _storageIndex;
+    private int _itemIndex;
+    private int _currentChunkLength;
+    private T[] _currentChunk;
+    private T _current;
+    private long _remaining;
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal LargeStorageEnumerator(T[][] storage, long offset, long count)
+    {
+        _storage = storage;
+        _remaining = count;
+        _current = default!;
+
+        if (count > 0 && storage != null && storage.Length > 0)
+        {
+            (int storageIndex, int itemIndex) = StorageExtensions.StorageGetIndex(offset);
+            _storageIndex = storageIndex;
+            _itemIndex = itemIndex - 1; // Will be incremented in MoveNext
+            _currentChunk = storage[storageIndex];
+            _currentChunkLength = _currentChunk.Length;
+        }
+        else
+        {
+            _storageIndex = 0;
+            _itemIndex = -1;
+            _currentChunk = null!;
+            _currentChunkLength = 0;
+        }
+    }
+
+    /// <inheritdoc/>
+    public readonly T Current
+    {
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        get => _current;
+    }
+
+    /// <inheritdoc/>
+    readonly object System.Collections.IEnumerator.Current => _current!;
+
+    /// <inheritdoc/>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public bool MoveNext()
+    {
+        if (_remaining <= 0)
+        {
+            return false;
+        }
+
+        _itemIndex++;
+
+        // Check if we need to move to the next chunk
+        if (_itemIndex >= _currentChunkLength)
+        {
+            _storageIndex++;
+            if (_storageIndex >= _storage.Length)
+            {
+                return false;
+            }
+            _currentChunk = _storage[_storageIndex];
+            _currentChunkLength = _currentChunk.Length;
+            _itemIndex = 0;
+        }
+
+        _current = _currentChunk[_itemIndex];
+        _remaining--;
+        return true;
+    }
+
+    /// <inheritdoc/>
+    public void Reset()
+    {
+        throw new NotSupportedException();
+    }
+
+    /// <inheritdoc/>
+    public readonly void Dispose()
+    {
+        // Nothing to dispose
+    }
+}
+
+/// <summary>
+/// High-performance struct enumerable wrapper for 2D storage arrays.
+/// Enables efficient foreach iteration without heap allocations.
+/// </summary>
+/// <typeparam name="T">The element type.</typeparam>
+public readonly struct LargeStorageEnumerable<T> : IEnumerable<T>
+{
+    private readonly T[][] _storage;
+    private readonly long _offset;
+    private readonly long _count;
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal LargeStorageEnumerable(T[][] storage, long offset, long count)
+    {
+        _storage = storage;
+        _offset = offset;
+        _count = count;
+    }
+
+    /// <summary>
+    /// Gets the struct enumerator for efficient iteration.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public LargeStorageEnumerator<T> GetEnumerator()
+    {
+        return new LargeStorageEnumerator<T>(_storage, _offset, _count);
+    }
+
+    IEnumerator<T> IEnumerable<T>.GetEnumerator() => GetEnumerator();
+    System.Collections.IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
 }

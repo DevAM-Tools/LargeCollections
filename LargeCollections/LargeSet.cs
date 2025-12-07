@@ -33,15 +33,19 @@ namespace LargeCollections;
 
 /// <summary>
 /// A mutable set of <typeparamref name="T"/> that can store up to <see cref="Constants.MaxLargeCollectionCount"/> elements.
-/// Sets are hash based. This version uses a struct comparer type parameter for maximum JIT inlining performance.
+/// Sets are hash based using separate chaining for optimal performance (similar to .NET Dictionary).
+/// This version uses a struct comparer type parameter for maximum JIT inlining performance.
 /// </summary>
 /// <typeparam name="T">The type of elements in the set.</typeparam>
 /// <typeparam name="TComparer">The type of equality comparer. Use a struct implementing <see cref="IEqualityComparer{T}"/> for best performance.</typeparam>
 [DebuggerDisplay("LargeSet: Count = {Count}")]
 public class LargeSet<T, TComparer> : ILargeCollection<T> where TComparer : IEqualityComparer<T>
 {
-    private SetElement<T>[][] _Storage = null;
-    private long _Capacity = 0L;
+    private int[][] _buckets;
+    private HashEntry<T>[][] _entries;
+    private long _bucketCount;
+    private int _freeList;
+    private int _freeCount;
     private TComparer _comparer;
 
     /// <summary>
@@ -88,7 +92,7 @@ public class LargeSet<T, TComparer> : ILargeCollection<T> where TComparer : IEqu
     public long Capacity
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        get => _Capacity;
+        get => _bucketCount;
     }
 
     public readonly double MinLoadFactor;
@@ -156,8 +160,11 @@ public class LargeSet<T, TComparer> : ILargeCollection<T> where TComparer : IEqu
 
         _comparer = comparer;
 
-        _Storage = StorageExtensions.StorageCreate<SetElement<T>>(capacity);
-        _Capacity = capacity;
+        _buckets = StorageExtensions.StorageCreate<int>(capacity);
+        _entries = StorageExtensions.StorageCreate<HashEntry<T>>(capacity);
+        _bucketCount = capacity;
+        _freeList = -1;
+        _freeCount = 0;
 
         Count = 0L;
 
@@ -173,10 +180,15 @@ public class LargeSet<T, TComparer> : ILargeCollection<T> where TComparer : IEqu
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void Add(T item)
     {
+        // Extend BEFORE adding if needed
+        Extend();
+
         long count = Count;
         long previousCount = count;
+        int freeList = _freeList;
+        int freeCount = _freeCount;
 
-        LargeSetHelpers.AddToStorage(ref item, _Storage, _Capacity, ref count, ref _comparer);
+        LargeSetHelpers.AddToStorage(ref item, _buckets, _entries, _bucketCount, ref count, ref freeList, ref freeCount, ref _comparer);
 
         if (count > previousCount && count > Constants.MaxLargeCollectionCount)
         {
@@ -184,7 +196,8 @@ public class LargeSet<T, TComparer> : ILargeCollection<T> where TComparer : IEqu
         }
 
         Count = count;
-        Extend();
+        _freeList = freeList;
+        _freeCount = freeCount;
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -276,8 +289,14 @@ public class LargeSet<T, TComparer> : ILargeCollection<T> where TComparer : IEqu
     public bool Remove(T item, out T removedItem)
     {
         long count = Count;
-        bool result = LargeSetHelpers.RemoveFromStorage(ref item, _Storage, Capacity, ref count, ref _comparer, out removedItem);
+        int freeList = _freeList;
+        int freeCount = _freeCount;
+        
+        bool result = LargeSetHelpers.RemoveFromStorage(ref item, _buckets, _entries, _bucketCount, ref count, ref freeList, ref freeCount, ref _comparer, out removedItem);
+        
         Count = count;
+        _freeList = freeList;
+        _freeCount = freeCount;
 
         if (result)
         {
@@ -291,21 +310,31 @@ public class LargeSet<T, TComparer> : ILargeCollection<T> where TComparer : IEqu
     public void Clear()
     {
         long count = Count;
-        LargeSetHelpers.ClearStorage(_Storage, _Capacity, ref count);
+        int freeList = _freeList;
+        int freeCount = _freeCount;
+        LargeSetHelpers.ClearStorage(_buckets, _entries, _bucketCount, ref count, ref freeList, ref freeCount);
         Count = count;
+        _freeList = freeList;
+        _freeCount = freeCount;
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public bool TryGetValue(T item, out T value)
     {
-        return LargeSetHelpers.TryGetValueFromStorage(ref item, _Storage, Capacity, ref _comparer, out value);
+        return LargeSetHelpers.TryGetValueFromStorage(ref item, _buckets, _entries, _bucketCount, ref _comparer, out value);
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public bool TryGetOrSetDefault(T item, out T value)
     {
+        // Extend BEFORE adding if needed
+        Extend();
+
         long count = Count;
-        bool found = LargeSetHelpers.TryGetOrAddToStorage(ref item, ref item, _Storage, _Capacity, ref count, ref _comparer, out value);
+        int freeList = _freeList;
+        int freeCount = _freeCount;
+        
+        bool found = LargeSetHelpers.TryGetOrAddToStorage(ref item, ref item, _buckets, _entries, _bucketCount, ref count, ref freeList, ref freeCount, ref _comparer, out value);
 
         if (!found && count > Constants.MaxLargeCollectionCount)
         {
@@ -313,11 +342,8 @@ public class LargeSet<T, TComparer> : ILargeCollection<T> where TComparer : IEqu
         }
 
         Count = count;
-
-        if (!found)
-        {
-            Extend();
-        }
+        _freeList = freeList;
+        _freeCount = freeCount;
 
         return found;
     }
@@ -325,8 +351,14 @@ public class LargeSet<T, TComparer> : ILargeCollection<T> where TComparer : IEqu
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public bool TryGetOrSet(T searchItem, T valueIfNotFound, out T value)
     {
+        // Extend BEFORE adding if needed
+        Extend();
+
         long count = Count;
-        bool found = LargeSetHelpers.TryGetOrAddToStorage(ref searchItem, ref valueIfNotFound, _Storage, _Capacity, ref count, ref _comparer, out value);
+        int freeList = _freeList;
+        int freeCount = _freeCount;
+        
+        bool found = LargeSetHelpers.TryGetOrAddToStorage(ref searchItem, ref valueIfNotFound, _buckets, _entries, _bucketCount, ref count, ref freeList, ref freeCount, ref _comparer, out value);
 
         if (!found && count > Constants.MaxLargeCollectionCount)
         {
@@ -334,11 +366,8 @@ public class LargeSet<T, TComparer> : ILargeCollection<T> where TComparer : IEqu
         }
 
         Count = count;
-
-        if (!found)
-        {
-            Extend();
-        }
+        _freeList = freeList;
+        _freeCount = freeCount;
 
         return found;
     }
@@ -351,8 +380,14 @@ public class LargeSet<T, TComparer> : ILargeCollection<T> where TComparer : IEqu
             throw new ArgumentNullException(nameof(valueFactory));
         }
 
+        // Extend BEFORE adding if needed
+        Extend();
+
         long count = Count;
-        bool found = LargeSetHelpers.TryGetOrAddToStorageWithFactory(ref searchItem, valueFactory, _Storage, _Capacity, ref count, ref _comparer, out value);
+        int freeList = _freeList;
+        int freeCount = _freeCount;
+        
+        bool found = LargeSetHelpers.TryGetOrAddToStorageWithFactory(ref searchItem, valueFactory, _buckets, _entries, _bucketCount, ref count, ref freeList, ref freeCount, ref _comparer, out value);
 
         if (!found && count > Constants.MaxLargeCollectionCount)
         {
@@ -360,11 +395,8 @@ public class LargeSet<T, TComparer> : ILargeCollection<T> where TComparer : IEqu
         }
 
         Count = count;
-
-        if (!found)
-        {
-            Extend();
-        }
+        _freeList = freeList;
+        _freeCount = freeCount;
 
         return found;
     }
@@ -372,13 +404,13 @@ public class LargeSet<T, TComparer> : ILargeCollection<T> where TComparer : IEqu
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public bool Contains(T item)
     {
-        return LargeSetHelpers.ContainsInStorage(ref item, _Storage, Capacity, ref _comparer);
+        return LargeSetHelpers.ContainsInStorage(ref item, _buckets, _entries, _bucketCount, ref _comparer);
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public IEnumerable<T> GetAll()
     {
-        return LargeSetHelpers.GetAllFromStorage(_Storage, _Capacity);
+        return LargeSetHelpers.GetAllFromStorage(_entries, Count, _freeCount);
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -397,20 +429,40 @@ public class LargeSet<T, TComparer> : ILargeCollection<T> where TComparer : IEqu
     private void Extend()
     {
         long count = Count;
-        long capacity = _Capacity;
-        LargeSetHelpers.ExtendStorage(ref _Storage, ref capacity, ref count, CapacityGrowFactor, FixedCapacityGrowAmount, FixedCapacityGrowLimit, MaxLoadFactor, ref _comparer);
-        _Capacity = capacity;
+        long bucketCount = _bucketCount;
+        int[][] buckets = _buckets;
+        HashEntry<T>[][] entries = _entries;
+        int freeList = _freeList;
+        int freeCount = _freeCount;
+        
+        LargeSetHelpers.ExtendStorage(ref buckets, ref entries, ref bucketCount, ref count, ref freeList, ref freeCount, CapacityGrowFactor, FixedCapacityGrowAmount, FixedCapacityGrowLimit, MaxLoadFactor, ref _comparer);
+        
+        _buckets = buckets;
+        _entries = entries;
+        _bucketCount = bucketCount;
         Count = count;
+        _freeList = freeList;
+        _freeCount = freeCount;
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void Shrink()
     {
         long count = Count;
-        long capacity = _Capacity;
-        LargeSetHelpers.ShrinkStorage(ref _Storage, ref capacity, ref count, MinLoadFactor, MinLoadFactorTolerance, ref _comparer);
-        _Capacity = capacity;
+        long bucketCount = _bucketCount;
+        int[][] buckets = _buckets;
+        HashEntry<T>[][] entries = _entries;
+        int freeList = _freeList;
+        int freeCount = _freeCount;
+        
+        LargeSetHelpers.ShrinkStorage(ref buckets, ref entries, ref bucketCount, ref count, ref freeList, ref freeCount, MinLoadFactor, MinLoadFactorTolerance, ref _comparer);
+        
+        _buckets = buckets;
+        _entries = entries;
+        _bucketCount = bucketCount;
         Count = count;
+        _freeList = freeList;
+        _freeCount = freeCount;
     }
 
     #region DoForEach Methods
@@ -422,7 +474,7 @@ public class LargeSet<T, TComparer> : ILargeCollection<T> where TComparer : IEqu
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void DoForEach(Action<T> action)
     {
-        LargeSetHelpers.DoForEachInStorage(_Storage, _Capacity, action);
+        LargeSetHelpers.DoForEachInStorage(_entries, Count, _freeCount, action);
     }
 
     /// <summary>
@@ -433,7 +485,7 @@ public class LargeSet<T, TComparer> : ILargeCollection<T> where TComparer : IEqu
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void DoForEach<TAction>(ref TAction action) where TAction : ILargeAction<T>
     {
-        LargeSetHelpers.DoForEachInStorage(_Storage, _Capacity, ref action);
+        LargeSetHelpers.DoForEachInStorage(_entries, Count, _freeCount, ref action);
     }
 
     #endregion

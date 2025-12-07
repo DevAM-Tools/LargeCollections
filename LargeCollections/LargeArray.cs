@@ -371,10 +371,19 @@ namespace LargeCollections
             return _Storage.StorageGetAll(offset, count);
         }
 
+        /// <summary>
+        /// Returns a high-performance struct enumerator for efficient iteration.
+        /// </summary>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public IEnumerator<T> GetEnumerator()
+        public LargeStorageEnumerator<T> GetEnumerator()
         {
-            return GetAll().GetEnumerator();
+            return _Storage.GetStructEnumerator(0L, Count);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        IEnumerator<T> IEnumerable<T>.GetEnumerator()
+        {
+            return _Storage.GetStructEnumerator(0L, Count);
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -387,7 +396,7 @@ namespace LargeCollections
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         IEnumerator IEnumerable.GetEnumerator()
         {
-            return GetAll().GetEnumerator();
+            return _Storage.GetStructEnumerator(0L, Count);
         }
 
         #region DoForEach Methods

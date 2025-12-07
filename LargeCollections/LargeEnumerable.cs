@@ -30,7 +30,6 @@ namespace LargeCollections;
 
 public class LargeEnumerable
 {
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static IEnumerable<long> Range(long start, long count, long step = 1L)
     {
         for (long i = 0L; i < count; i++)
@@ -39,7 +38,6 @@ public class LargeEnumerable
         }
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static IEnumerable<long> Range(long end)
     {
         for (long i = 0L; i < end; i++)
@@ -48,7 +46,6 @@ public class LargeEnumerable
         }
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static IEnumerable<T> Repeat<T>(T item, long count)
     {
         for (long i = 0L; i < count; i++)

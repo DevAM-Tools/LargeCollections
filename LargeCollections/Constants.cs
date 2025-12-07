@@ -49,7 +49,7 @@ namespace LargeCollections
 
                 public const long DefaultFixedCapacityGrowLimit = 50L * 1024L * 1024L;
 
-                public const double DefaultMinLoadFactor = 0.5;
+                public const double DefaultMinLoadFactor = 0.25;
                 public const double DefaultMaxLoadFactor = 1.0;
 
                 public const double DefaultMinLoadFactorTolerance = 0.1;

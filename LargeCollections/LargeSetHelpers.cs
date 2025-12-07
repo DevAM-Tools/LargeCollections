@@ -24,440 +24,613 @@ SOFTWARE.
 */
 
 using System;
+using System.Collections;
 using System.Collections.Generic;
-using System.Diagnostics;
 using System.Runtime.CompilerServices;
 
 namespace LargeCollections;
 
 /// <summary>
+/// Hash entry for separate chaining storage. Uses index-based linking for cache efficiency.
+/// Similar to .NET Dictionary's Entry structure.
+/// </summary>
+internal struct HashEntry<T>
+{
+    /// <summary>Cached hash code of the item.</summary>
+    internal int HashCode;
+    
+    /// <summary>
+    /// 0-based index of next entry in chain: -1 means end of chain.
+    /// Also encodes whether this entry is part of the free list by changing sign and subtracting 2,
+    /// so -2 means end of free list, -3 means index 0 but on free list, -4 means index 1 on free list, etc.
+    /// </summary>
+    internal int Next;
+    
+    /// <summary>The stored item.</summary>
+    internal T Item;
+}
+
+/// <summary>
 /// Internal helper class containing shared algorithms for hash-based collections (LargeSet and LargeDictionary).
-/// All methods use generic TComparer parameters to enable JIT devirtualization and inlining for optimal performance.
+/// Uses separate chaining with index-based linking for optimal performance (similar to .NET Dictionary).
 /// </summary>
 internal static class LargeSetHelpers
 {
-    /// <summary>
-    /// Gets the bucket index using a struct equality comparer for optimal performance.
-    /// </summary>
+    /// <summary>Start marker for free list encoding (subtract index and this value to encode).</summary>
+    private const int StartOfFreeList = -3;
+
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    internal static long GetBucketIndex<T, TComparer>(ref T item, long capacity, ref TComparer comparer)
-        where TComparer : IEqualityComparer<T>
+    internal static long GetBucketIndex(int hashCode, long bucketCount)
     {
-        ulong hash = unchecked((uint)comparer.GetHashCode(item));
-        long bucketIndex = (long)(hash % (ulong)capacity);
-        return bucketIndex;
+        return (long)((uint)hashCode % (ulong)bucketCount);
     }
 
     /// <summary>
-    /// Adds an item to storage using a struct equality comparer for optimal performance.
+    /// Adds an item to storage using separate chaining.
     /// </summary>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    internal static void AddToStorage<T, TComparer>(ref T item, SetElement<T>[][] storage, long capacity, ref long count, ref TComparer comparer)
+    internal static void AddToStorage<T, TComparer>(
+        ref T item,
+        int[][] buckets,
+        HashEntry<T>[][] entries,
+        long bucketCount,
+        ref long count,
+        ref int freeList,
+        ref int freeCount,
+        ref TComparer comparer)
         where TComparer : IEqualityComparer<T>
     {
-        long bucketIndex = GetBucketIndex(ref item, capacity, ref comparer);
-
-        SetElement<T> element = storage.StorageGet(bucketIndex);
-
-        if (element is null)
+        int hashCode = comparer.GetHashCode(item) & 0x7FFFFFFF; // Ensure positive
+        long bucketIndex = GetBucketIndex(hashCode, bucketCount);
+        
+        ref int bucket = ref buckets.StorageGetRef(bucketIndex);
+        int i = bucket - 1; // Buckets are 1-based
+        
+        // Search for existing item
+        while (i >= 0)
         {
-            storage.StorageSet(bucketIndex, new SetElement<T>(item));
-            count++;
-            return;
-        }
-
-        while (element is not null)
-        {
-            if (comparer.Equals(item, element.Item))
+            ref HashEntry<T> entry = ref entries.StorageGetRef(i);
+            if (entry.HashCode == hashCode && comparer.Equals(entry.Item, item))
             {
-                element.Item = item;
+                // Update existing item
+                entry.Item = item;
                 return;
             }
-
-            if (element.NextElement is null)
-            {
-                element.NextElement = new SetElement<T>(item);
-                count++;
-                return;
-            }
-
-            element = element.NextElement;
+            i = entry.Next;
         }
+        
+        // Item not found, add new entry
+        int index;
+        if (freeCount > 0)
+        {
+            // Reuse entry from free list
+            index = freeList;
+            ref HashEntry<T> freeEntry = ref entries.StorageGetRef(index);
+            freeList = StartOfFreeList - freeEntry.Next;
+            freeCount--;
+        }
+        else
+        {
+            // Use next available slot
+            index = (int)count;
+        }
+        
+        ref HashEntry<T> newEntry = ref entries.StorageGetRef(index);
+        newEntry.HashCode = hashCode;
+        newEntry.Next = bucket - 1; // Link to previous head of chain
+        newEntry.Item = item;
+        bucket = index + 1; // Buckets are 1-based
+        
+        count++;
     }
 
     /// <summary>
-    /// Tries to get an existing item or adds a new one using a struct equality comparer.
+    /// Tries to get an existing item or adds a new one.
     /// </summary>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    internal static bool TryGetOrAddToStorage<T, TComparer>(ref T searchItem, ref T valueIfNotFound, SetElement<T>[][] storage, long capacity, ref long count, ref TComparer comparer, out T value)
+    internal static bool TryGetOrAddToStorage<T, TComparer>(
+        ref T searchItem,
+        ref T valueIfNotFound,
+        int[][] buckets,
+        HashEntry<T>[][] entries,
+        long bucketCount,
+        ref long count,
+        ref int freeList,
+        ref int freeCount,
+        ref TComparer comparer,
+        out T value)
         where TComparer : IEqualityComparer<T>
     {
-        long bucketIndex = GetBucketIndex(ref searchItem, capacity, ref comparer);
-
-        SetElement<T> element = storage.StorageGet(bucketIndex);
-
-        if (element is null)
+        int hashCode = comparer.GetHashCode(searchItem) & 0x7FFFFFFF;
+        long bucketIndex = GetBucketIndex(hashCode, bucketCount);
+        
+        ref int bucket = ref buckets.StorageGetRef(bucketIndex);
+        int i = bucket - 1;
+        
+        // Search for existing item
+        while (i >= 0)
         {
-            storage.StorageSet(bucketIndex, new SetElement<T>(valueIfNotFound));
-            count++;
-            value = valueIfNotFound;
-            return false;
-        }
-
-        while (element is not null)
-        {
-            if (comparer.Equals(searchItem, element.Item))
+            ref HashEntry<T> entry = ref entries.StorageGetRef(i);
+            if (entry.HashCode == hashCode && comparer.Equals(entry.Item, searchItem))
             {
-                value = element.Item;
+                value = entry.Item;
                 return true;
             }
-
-            if (element.NextElement is null)
-            {
-                element.NextElement = new SetElement<T>(valueIfNotFound);
-                count++;
-                value = valueIfNotFound;
-                return false;
-            }
-
-            element = element.NextElement;
+            i = entry.Next;
         }
+        
+        // Not found, add new entry
+        int index;
+        if (freeCount > 0)
+        {
+            index = freeList;
+            ref HashEntry<T> freeEntry = ref entries.StorageGetRef(index);
+            freeList = StartOfFreeList - freeEntry.Next;
+            freeCount--;
+        }
+        else
+        {
+            index = (int)count;
+        }
+        
+        int valueHashCode = comparer.GetHashCode(valueIfNotFound) & 0x7FFFFFFF;
+        ref HashEntry<T> newEntry = ref entries.StorageGetRef(index);
+        newEntry.HashCode = valueHashCode;
+        newEntry.Next = bucket - 1;
+        newEntry.Item = valueIfNotFound;
+        bucket = index + 1;
+        
+        count++;
+        value = valueIfNotFound;
+        return false;
+    }
 
+    /// <summary>
+    /// Tries to get an existing item or adds a new one created by factory.
+    /// </summary>
+    internal static bool TryGetOrAddToStorageWithFactory<T, TComparer>(
+        ref T searchItem,
+        Func<T> valueFactory,
+        int[][] buckets,
+        HashEntry<T>[][] entries,
+        long bucketCount,
+        ref long count,
+        ref int freeList,
+        ref int freeCount,
+        ref TComparer comparer,
+        out T value)
+        where TComparer : IEqualityComparer<T>
+    {
+        int hashCode = comparer.GetHashCode(searchItem) & 0x7FFFFFFF;
+        long bucketIndex = GetBucketIndex(hashCode, bucketCount);
+        
+        ref int bucket = ref buckets.StorageGetRef(bucketIndex);
+        int i = bucket - 1;
+        
+        // Search for existing item
+        while (i >= 0)
+        {
+            ref HashEntry<T> entry = ref entries.StorageGetRef(i);
+            if (entry.HashCode == hashCode && comparer.Equals(entry.Item, searchItem))
+            {
+                value = entry.Item;
+                return true;
+            }
+            i = entry.Next;
+        }
+        
+        // Not found, create and add new entry
+        T newItem = valueFactory();
+        
+        int index;
+        if (freeCount > 0)
+        {
+            index = freeList;
+            ref HashEntry<T> freeEntry = ref entries.StorageGetRef(index);
+            freeList = StartOfFreeList - freeEntry.Next;
+            freeCount--;
+        }
+        else
+        {
+            index = (int)count;
+        }
+        
+        int valueHashCode = comparer.GetHashCode(newItem) & 0x7FFFFFFF;
+        ref HashEntry<T> newEntry = ref entries.StorageGetRef(index);
+        newEntry.HashCode = valueHashCode;
+        newEntry.Next = bucket - 1;
+        newEntry.Item = newItem;
+        bucket = index + 1;
+        
+        count++;
+        value = newItem;
+        return false;
+    }
+
+    /// <summary>
+    /// Gets an item from storage using separate chaining lookup.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal static bool TryGetValueFromStorage<T, TComparer>(
+        ref T searchItem,
+        int[][] buckets,
+        HashEntry<T>[][] entries,
+        long bucketCount,
+        ref TComparer comparer,
+        out T value)
+        where TComparer : IEqualityComparer<T>
+    {
+        int hashCode = comparer.GetHashCode(searchItem) & 0x7FFFFFFF;
+        long bucketIndex = GetBucketIndex(hashCode, bucketCount);
+        
+        int i = buckets.StorageGet(bucketIndex) - 1; // Buckets are 1-based
+        
+        while (i >= 0)
+        {
+            ref HashEntry<T> entry = ref entries.StorageGetRef(i);
+            if (entry.HashCode == hashCode && comparer.Equals(entry.Item, searchItem))
+            {
+                value = entry.Item;
+                return true;
+            }
+            i = entry.Next;
+        }
+        
         value = default;
         return false;
     }
 
     /// <summary>
-    /// Tries to get an existing item or adds a new one created by factory using a struct equality comparer.
+    /// Gets a reference to an item from storage.
     /// </summary>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    internal static bool TryGetOrAddToStorageWithFactory<T, TComparer>(ref T searchItem, Func<T> valueFactory, SetElement<T>[][] storage, long capacity, ref long count, ref TComparer comparer, out T value)
+    internal static ref T GetRefFromStorage<T, TComparer>(
+        ref T searchItem,
+        int[][] buckets,
+        HashEntry<T>[][] entries,
+        long bucketCount,
+        ref TComparer comparer)
         where TComparer : IEqualityComparer<T>
     {
-        long bucketIndex = GetBucketIndex(ref searchItem, capacity, ref comparer);
-
-        SetElement<T> element = storage.StorageGet(bucketIndex);
-
-        if (element is null)
+        int hashCode = comparer.GetHashCode(searchItem) & 0x7FFFFFFF;
+        long bucketIndex = GetBucketIndex(hashCode, bucketCount);
+        
+        int i = buckets.StorageGet(bucketIndex) - 1;
+        
+        while (i >= 0)
         {
-            // Item not found, create and add it
-            T newItem = valueFactory.Invoke();
-            storage.StorageSet(bucketIndex, new SetElement<T>(newItem));
-            count++;
-            value = newItem;
-            return false;
-        }
-
-        while (element is not null)
-        {
-            if (comparer.Equals(searchItem, element.Item))
+            ref HashEntry<T> entry = ref entries.StorageGetRef(i);
+            if (entry.HashCode == hashCode && comparer.Equals(entry.Item, searchItem))
             {
-                // Item found, return existing value
-                value = element.Item;
-                return true;
+                return ref entry.Item;
             }
-
-            if (element.NextElement is null)
-            {
-                // Item not found, create and add it to the chain
-                T newItem = valueFactory.Invoke();
-                element.NextElement = new SetElement<T>(newItem);
-                count++;
-                value = newItem;
-                return false;
-            }
-
-            element = element.NextElement;
+            i = entry.Next;
         }
-
-        // Should never reach here
-        value = default;
-        return false;
+        
+        throw new KeyNotFoundException("The given item was not found in the storage.");
     }
 
     /// <summary>
-    /// Gets an item from storage using a struct equality comparer for optimal performance.
+    /// Checks if storage contains an item.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    internal static bool TryGetValueFromStorage<T, TComparer>(ref T searchItem, SetElement<T>[][] storage, long capacity, ref TComparer comparer, out T value)
+    internal static bool ContainsInStorage<T, TComparer>(
+        ref T searchItem,
+        int[][] buckets,
+        HashEntry<T>[][] entries,
+        long bucketCount,
+        ref TComparer comparer)
         where TComparer : IEqualityComparer<T>
     {
-        long bucketIndex = GetBucketIndex(ref searchItem, capacity, ref comparer);
-
-        SetElement<T> element = storage.StorageGet(bucketIndex);
-
-        while (element is not null)
-        {
-            if (comparer.Equals(searchItem, element.Item))
-            {
-                value = element.Item;
-                return true;
-            }
-
-            element = element.NextElement;
-        }
-
-        value = default;
-        return false;
+        return TryGetValueFromStorage(ref searchItem, buckets, entries, bucketCount, ref comparer, out _);
     }
 
     /// <summary>
-    /// Gets a reference to an item from storage using a struct equality comparer.
+    /// Removes an item from storage using separate chaining.
     /// </summary>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    internal static ref T GetRefFromStorage<T, TComparer>(ref T searchItem, SetElement<T>[][] storage, long capacity, ref TComparer comparer)
+    internal static bool RemoveFromStorage<T, TComparer>(
+        ref T searchItem,
+        int[][] buckets,
+        HashEntry<T>[][] entries,
+        long bucketCount,
+        ref long count,
+        ref int freeList,
+        ref int freeCount,
+        ref TComparer comparer,
+        out T removedItem)
         where TComparer : IEqualityComparer<T>
     {
-        long bucketIndex = GetBucketIndex(ref searchItem, capacity, ref comparer);
-
-        SetElement<T> element = storage.StorageGet(bucketIndex);
-
-        while (element is not null)
+        int hashCode = comparer.GetHashCode(searchItem) & 0x7FFFFFFF;
+        long bucketIndex = GetBucketIndex(hashCode, bucketCount);
+        
+        ref int bucket = ref buckets.StorageGetRef(bucketIndex);
+        int i = bucket - 1;
+        int last = -1;
+        
+        while (i >= 0)
         {
-            if (comparer.Equals(searchItem, element.Item))
+            ref HashEntry<T> entry = ref entries.StorageGetRef(i);
+            
+            if (entry.HashCode == hashCode && comparer.Equals(entry.Item, searchItem))
             {
-                return ref element.Item;
-            }
-            element = element.NextElement;
-        }
-
-        throw new KeyNotFoundException($"The given item was not found in the storage.");
-    }
-
-    /// <summary>
-    /// Checks if storage contains an item using a struct equality comparer.
-    /// </summary>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    internal static bool ContainsInStorage<T, TComparer>(ref T searchItem, SetElement<T>[][] storage, long capacity, ref TComparer comparer)
-        where TComparer : IEqualityComparer<T>
-    {
-        return TryGetValueFromStorage(ref searchItem, storage, capacity, ref comparer, out _);
-    }
-
-    /// <summary>
-    /// Removes an item from storage using a struct equality comparer.
-    /// </summary>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    internal static bool RemoveFromStorage<T, TComparer>(ref T searchItem, SetElement<T>[][] storage, long capacity, ref long count, ref TComparer comparer, out T removedItem)
-        where TComparer : IEqualityComparer<T>
-    {
-        long bucketIndex = GetBucketIndex(ref searchItem, capacity, ref comparer);
-
-        SetElement<T> element = storage.StorageGet(bucketIndex);
-        SetElement<T> previousElement = null;
-
-        while (element is not null)
-        {
-            if (comparer.Equals(searchItem, element.Item))
-            {
-                removedItem = element.Item;
-                element.Item = default;
-
-                // Is it the first and only element?
-                if (previousElement is null && element.NextElement is null)
+                removedItem = entry.Item;
+                
+                // Remove from chain
+                if (last < 0)
                 {
-                    storage.StorageSet(bucketIndex, null);
+                    bucket = entry.Next + 1; // Update bucket head
                 }
-                // Is it the first but one of many elements?
-                else if (previousElement is null && element.NextElement is not null)
-                {
-                    storage.StorageSet(bucketIndex, element.NextElement);
-                }
-                // Is it one of many elements but not the first one?
                 else
                 {
-                    previousElement.NextElement = element.NextElement;
+                    entries.StorageGetRef(last).Next = entry.Next;
                 }
-
+                
+                // Add to free list
+                entry.Next = StartOfFreeList - freeList;
+                entry.Item = default; // Clear reference for GC
+                
+                freeList = i;
+                freeCount++;
                 count--;
+                
                 return true;
             }
-
-            previousElement = element;
-            element = element.NextElement;
+            
+            last = i;
+            i = entry.Next;
         }
-
+        
         removedItem = default;
         return false;
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    internal static void ClearStorage<T>(SetElement<T>[][] storage, long capacity, ref long count)
+    /// <summary>
+    /// Clears storage.
+    /// </summary>
+    internal static void ClearStorage<T>(
+        int[][] buckets,
+        HashEntry<T>[][] entries,
+        long bucketCount,
+        ref long count,
+        ref int freeList,
+        ref int freeCount)
     {
-        // Use bulk Array.Clear for each segment instead of per-element clearing
-        // This is significantly faster for large capacities
-        for (int i = 0; i < storage.Length; i++)
+        if (count > 0 || freeCount > 0)
         {
-            SetElement<T>[] segment = storage[i];
-            if (segment != null)
+            // Clear buckets
+            for (int i = 0; i < buckets.Length; i++)
             {
-                Array.Clear(segment, 0, segment.Length);
+                if (buckets[i] != null)
+                    Array.Clear(buckets[i], 0, buckets[i].Length);
             }
-        }
-
-        count = 0L;
-    }
-
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    internal static void CopyStorage<T, TComparer>(SetElement<T>[][] sourceStorage, long sourceCapacity, SetElement<T>[][] targetStorage, long targetCapacity, ref long targetCount, ref TComparer comparer, bool clearSourceStorage)
-        where TComparer : IEqualityComparer<T>
-    {
-        for (long i = 0L; i < sourceCapacity; i++)
-        {
-            SetElement<T> element = sourceStorage.StorageGet(i);
-
-            while (element is not null)
+            
+            // Clear entries up to count + freeCount
+            long entriesToClear = count + freeCount;
+            for (long i = 0; i < entriesToClear; i++)
             {
-                AddToStorage(ref element.Item, targetStorage, targetCapacity, ref targetCount, ref comparer);
-
-                SetElement<T> nextElement = element.NextElement;
-                if (clearSourceStorage)
-                {
-                    element.NextElement = null;
-                }
-                element = nextElement;
+                ref HashEntry<T> entry = ref entries.StorageGetRef(i);
+                entry = default;
             }
-
-            if (clearSourceStorage)
-            {
-                sourceStorage.StorageSet(i, null);
-            }
+            
+            count = 0L;
+            freeList = -1;
+            freeCount = 0;
         }
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    internal static IEnumerable<T> GetAllFromStorage<T>(SetElement<T>[][] storage, long capacity)
+    internal static HashStorageEnumerable<T> GetAllFromStorage<T>(HashEntry<T>[][] entries, long count, int freeCount)
     {
-        for (long i = 0L; i < capacity; i++)
-        {
-            SetElement<T> element = storage.StorageGet(i);
-
-            while (element is not null)
-            {
-                yield return element.Item;
-                element = element.NextElement;
-            }
-        }
+        return new HashStorageEnumerable<T>(entries, count, freeCount);
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    internal static void DoForEachInStorage<T>(SetElement<T>[][] storage, long capacity, Action<T> action)
+    internal static void DoForEachInStorage<T>(HashEntry<T>[][] entries, long count, int freeCount, Action<T> action)
     {
         if (action is null)
-        {
             throw new ArgumentNullException(nameof(action));
-        }
 
-        for (long i = 0L; i < capacity; i++)
+        long totalEntries = count + freeCount;
+        for (long i = 0L; i < totalEntries; i++)
         {
-            SetElement<T> element = storage.StorageGet(i);
-
-            while (element is not null)
-            {
-                ref T item = ref element.Item;
-                action.Invoke(item);
-                element = element.NextElement;
-            }
+            ref HashEntry<T> entry = ref entries.StorageGetRef(i);
+            if (entry.Next >= -1) // Not in free list
+                action(entry.Item);
         }
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    internal static void DoForEachInStorage<T, TAction>(SetElement<T>[][] storage, long capacity, ref TAction action) where TAction : ILargeAction<T>
+    internal static void DoForEachInStorage<T, TAction>(HashEntry<T>[][] entries, long count, int freeCount, ref TAction action) 
+        where TAction : ILargeAction<T>
     {
-        for (long i = 0L; i < capacity; i++)
+        long totalEntries = count + freeCount;
+        for (long i = 0L; i < totalEntries; i++)
         {
-            SetElement<T> element = storage.StorageGet(i);
-
-            while (element is not null)
-            {
-                ref T item = ref element.Item;
-                action.Invoke(item);
-                element = element.NextElement;
-            }
+            ref HashEntry<T> entry = ref entries.StorageGetRef(i);
+            if (entry.Next >= -1) // Not in free list
+                action.Invoke(entry.Item);
         }
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    internal static void ExtendStorage<T, TComparer>(ref SetElement<T>[][] storage, ref long capacity, ref long count, double capacityGrowFactor, long fixedCapacityGrowAmount, long fixedCapacityGrowLimit, double maxLoadFactor, ref TComparer comparer)
+    internal static void ExtendStorage<T, TComparer>(
+        ref int[][] buckets,
+        ref HashEntry<T>[][] entries,
+        ref long bucketCount,
+        ref long count,
+        ref int freeList,
+        ref int freeCount,
+        double capacityGrowFactor,
+        long fixedCapacityGrowAmount,
+        long fixedCapacityGrowLimit,
+        double maxLoadFactor,
+        ref TComparer comparer)
         where TComparer : IEqualityComparer<T>
     {
-        double loadFactor = (double)count / capacity;
-
-        if (loadFactor <= maxLoadFactor)
-        {
+        // Check if we need to extend based on load factor or capacity
+        long usedSlots = count + freeCount;
+        double loadFactor = (double)(count + 1) / bucketCount;
+        
+        if (loadFactor <= maxLoadFactor && usedSlots < bucketCount)
             return;
-        }
 
-        // Check if we're already at maximum capacity
-        if (capacity >= Constants.MaxLargeCollectionCount)
-        {
-            throw new InvalidOperationException($"Cannot extend collection beyond maximum capacity of {Constants.MaxLargeCollectionCount} elements.");
-        }
-
-        // As long as the used hash value only uses 32 bit it does not make sense to use more than 2^32-1 buckets
         long maxCapacity = Math.Min(Constants.MaxLargeCollectionCount, uint.MaxValue);
-        if (capacity >= maxCapacity)
+        
+        if (bucketCount >= maxCapacity)
         {
-            throw new InvalidOperationException($"Cannot extend collection beyond maximum capacity of {maxCapacity} elements.");
-        }
-
-        long newCapacity = StorageExtensions.GetGrownCapacity(capacity, capacityGrowFactor, fixedCapacityGrowAmount, fixedCapacityGrowLimit);
-
-        // Cap to maximum allowed capacity (both MaxLargeCollectionCount and uint.MaxValue for hash bucket limit)
-        if (newCapacity > maxCapacity)
-        {
-            newCapacity = maxCapacity;
-        }
-
-        SetElement<T>[][] newStorage = StorageExtensions.StorageCreate<SetElement<T>>(newCapacity);
-        long newStorageCount = 0L;
-        CopyStorage(storage, capacity, newStorage, newCapacity, ref newStorageCount, ref comparer, true);
-
-        storage = newStorage;
-        capacity = newCapacity;
-        count = newStorageCount;
-    }
-
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    internal static void ShrinkStorage<T, TComparer>(ref SetElement<T>[][] storage, ref long capacity, ref long count, double minLoadFactor, double minLoadFactorTolerance, ref TComparer comparer)
-        where TComparer : IEqualityComparer<T>
-    {
-        double loadFactor = (double)count / capacity;
-
-        if (loadFactor >= minLoadFactor * minLoadFactorTolerance)
-        {
+            if (usedSlots >= bucketCount)
+                throw new InvalidOperationException($"Cannot extend collection beyond maximum capacity of {maxCapacity} elements.");
             return;
         }
 
-        long newCapacity = (long)(capacity * minLoadFactor);
-        newCapacity = newCapacity > 0L ? newCapacity : 1L;
+        long newBucketCount = StorageExtensions.GetGrownCapacity(bucketCount, capacityGrowFactor, fixedCapacityGrowAmount, fixedCapacityGrowLimit);
+        if (newBucketCount > maxCapacity)
+            newBucketCount = maxCapacity;
 
-        SetElement<T>[][] newStorage = StorageExtensions.StorageCreate<SetElement<T>>(newCapacity);
-        long newStorageCount = 0L;
-        CopyStorage(storage, capacity, newStorage, newCapacity, ref newStorageCount, ref comparer, true);
+        // Create new storage
+        int[][] newBuckets = StorageExtensions.StorageCreate<int>(newBucketCount);
+        HashEntry<T>[][] newEntries = StorageExtensions.StorageCreate<HashEntry<T>>(newBucketCount);
 
-        storage = newStorage;
-        capacity = newCapacity;
-        count = newStorageCount;
+        // Copy and rehash entries (excluding free list entries)
+        long newCount = 0;
+        long totalEntries = count + freeCount;
+        for (long i = 0; i < totalEntries; i++)
+        {
+            ref HashEntry<T> oldEntry = ref entries.StorageGetRef(i);
+            if (oldEntry.Next >= -1) // Not in free list
+            {
+                long newBucketIndex = GetBucketIndex(oldEntry.HashCode, newBucketCount);
+                ref int newBucket = ref newBuckets.StorageGetRef(newBucketIndex);
+                
+                ref HashEntry<T> newEntry = ref newEntries.StorageGetRef(newCount);
+                newEntry.HashCode = oldEntry.HashCode;
+                newEntry.Next = newBucket - 1;
+                newEntry.Item = oldEntry.Item;
+                newBucket = (int)newCount + 1;
+                
+                newCount++;
+            }
+        }
+
+        buckets = newBuckets;
+        entries = newEntries;
+        bucketCount = newBucketCount;
+        count = newCount;
+        freeList = -1;
+        freeCount = 0;
+    }
+
+    internal static void ShrinkStorage<T, TComparer>(
+        ref int[][] buckets,
+        ref HashEntry<T>[][] entries,
+        ref long bucketCount,
+        ref long count,
+        ref int freeList,
+        ref int freeCount,
+        double minLoadFactor,
+        double minLoadFactorTolerance,
+        ref TComparer comparer)
+        where TComparer : IEqualityComparer<T>
+    {
+        double loadFactor = (double)count / bucketCount;
+        if (loadFactor >= minLoadFactor * minLoadFactorTolerance)
+            return;
+
+        long newBucketCount = Math.Max(1L, (long)(count / 0.5)); // Target ~50% load after shrink
+
+        int[][] newBuckets = StorageExtensions.StorageCreate<int>(newBucketCount);
+        HashEntry<T>[][] newEntries = StorageExtensions.StorageCreate<HashEntry<T>>(newBucketCount);
+
+        long newCount = 0;
+        long totalEntries = count + freeCount;
+        for (long i = 0; i < totalEntries; i++)
+        {
+            ref HashEntry<T> oldEntry = ref entries.StorageGetRef(i);
+            if (oldEntry.Next >= -1)
+            {
+                long newBucketIndex = GetBucketIndex(oldEntry.HashCode, newBucketCount);
+                ref int newBucket = ref newBuckets.StorageGetRef(newBucketIndex);
+                
+                ref HashEntry<T> newEntry = ref newEntries.StorageGetRef(newCount);
+                newEntry.HashCode = oldEntry.HashCode;
+                newEntry.Next = newBucket - 1;
+                newEntry.Item = oldEntry.Item;
+                newBucket = (int)newCount + 1;
+                
+                newCount++;
+            }
+        }
+
+        buckets = newBuckets;
+        entries = newEntries;
+        bucketCount = newBucketCount;
+        count = newCount;
+        freeList = -1;
+        freeCount = 0;
     }
 }
 
 /// <summary>
-/// Internal element class for hash-based storage
+/// High-performance struct enumerator for separate chaining hash storage.
+/// Only iterates over actual entries, skipping free list entries.
 /// </summary>
-[DebuggerDisplay("Item = {Item}")]
-internal class SetElement<T>
+internal struct HashStorageEnumerator<T> : IEnumerator<T>
 {
-    internal T Item;
-    internal SetElement<T> NextElement;
+    private readonly HashEntry<T>[][] _entries;
+    private readonly long _totalEntries;
+    private long _currentIndex;
+    private T _current;
 
-    internal SetElement(T item, SetElement<T> nextElement)
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal HashStorageEnumerator(HashEntry<T>[][] entries, long count, int freeCount)
     {
-        Item = item;
-        NextElement = nextElement;
+        _entries = entries;
+        _totalEntries = count + freeCount;
+        _currentIndex = -1;
+        _current = default!;
     }
 
-    internal SetElement() : this(default, null) { }
+    public readonly T Current
+    {
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        get => _current;
+    }
 
-    internal SetElement(T item) : this(item, null) { }
+    readonly object IEnumerator.Current => _current!;
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public bool MoveNext()
+    {
+        while (++_currentIndex < _totalEntries)
+        {
+            ref HashEntry<T> entry = ref _entries.StorageGetRef(_currentIndex);
+            if (entry.Next >= -1) // Not in free list
+            {
+                _current = entry.Item;
+                return true;
+            }
+        }
+        _current = default!;
+        return false;
+    }
+
+    public void Reset() => throw new NotSupportedException();
+    public readonly void Dispose() { }
+}
+
+/// <summary>
+/// High-performance struct enumerable for separate chaining hash storage.
+/// </summary>
+internal readonly struct HashStorageEnumerable<T> : IEnumerable<T>
+{
+    private readonly HashEntry<T>[][] _entries;
+    private readonly long _count;
+    private readonly int _freeCount;
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal HashStorageEnumerable(HashEntry<T>[][] entries, long count, int freeCount)
+    {
+        _entries = entries;
+        _count = count;
+        _freeCount = freeCount;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public HashStorageEnumerator<T> GetEnumerator() => new(_entries, _count, _freeCount);
+
+    IEnumerator<T> IEnumerable<T>.GetEnumerator() => GetEnumerator();
+    IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
 }

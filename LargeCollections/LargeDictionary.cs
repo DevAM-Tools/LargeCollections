@@ -34,7 +34,8 @@ namespace LargeCollections;
 /// <summary>
 /// A mutable dictionary of <typeparamref name="TKey"/> as key and <typeparamref name="TValue"/> as value 
 /// that can store up to <see cref="Constants.MaxLargeCollectionCount"/> elements.
-/// Dictionaries are hash based. This version uses a struct comparer type parameter for maximum JIT inlining performance.
+/// Dictionaries are hash based using separate chaining for optimal performance (similar to .NET Dictionary).
+/// This version uses a struct comparer type parameter for maximum JIT inlining performance.
 /// </summary>
 /// <typeparam name="TKey">The type of keys in the dictionary.</typeparam>
 /// <typeparam name="TValue">The type of values in the dictionary.</typeparam>
@@ -44,8 +45,11 @@ public class LargeDictionary<TKey, TValue, TComparer> : ILargeDictionary<TKey, T
     where TKey : notnull
     where TComparer : IEqualityComparer<KeyValuePair<TKey, TValue>>
 {
-    private SetElement<KeyValuePair<TKey, TValue>>[][] _storage = null;
-    private long _capacity = 0L;
+    private int[][] _buckets;
+    private HashEntry<KeyValuePair<TKey, TValue>>[][] _entries;
+    private long _bucketCount;
+    private int _freeList;
+    private int _freeCount;
     private TComparer _comparer;
 
     /// <summary>
@@ -62,7 +66,7 @@ public class LargeDictionary<TKey, TValue, TComparer> : ILargeDictionary<TKey, T
     public long Capacity
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        get => _capacity;
+        get => _bucketCount;
     }
 
     public double CapacityGrowFactor { get; private set; }
@@ -133,8 +137,11 @@ public class LargeDictionary<TKey, TValue, TComparer> : ILargeDictionary<TKey, T
         }
 
         _comparer = comparer;
-        _storage = StorageExtensions.StorageCreate<SetElement<KeyValuePair<TKey, TValue>>>(capacity);
-        _capacity = capacity;
+        _buckets = StorageExtensions.StorageCreate<int>(capacity);
+        _entries = StorageExtensions.StorageCreate<HashEntry<KeyValuePair<TKey, TValue>>>(capacity);
+        _bucketCount = capacity;
+        _freeList = -1;
+        _freeCount = 0;
 
         Count = 0L;
 
@@ -149,17 +156,15 @@ public class LargeDictionary<TKey, TValue, TComparer> : ILargeDictionary<TKey, T
 
     public IEnumerable<TKey> Keys
     {
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         get
         {
-            long capacity = Capacity;
-            for (long i = 0L; i < capacity; i++)
+            long totalEntries = Count + _freeCount;
+            for (long i = 0L; i < totalEntries; i++)
             {
-                SetElement<KeyValuePair<TKey, TValue>> element = _storage.StorageGet(i);
-                while (element is not null)
+                ref HashEntry<KeyValuePair<TKey, TValue>> entry = ref _entries.StorageGetRef(i);
+                if (entry.Next >= -1) // Not in free list
                 {
-                    yield return element.Item.Key;
-                    element = element.NextElement;
+                    yield return entry.Item.Key;
                 }
             }
         }
@@ -167,17 +172,15 @@ public class LargeDictionary<TKey, TValue, TComparer> : ILargeDictionary<TKey, T
 
     public IEnumerable<TValue> Values
     {
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         get
         {
-            long capacity = Capacity;
-            for (long i = 0L; i < capacity; i++)
+            long totalEntries = Count + _freeCount;
+            for (long i = 0L; i < totalEntries; i++)
             {
-                SetElement<KeyValuePair<TKey, TValue>> element = _storage.StorageGet(i);
-                while (element is not null)
+                ref HashEntry<KeyValuePair<TKey, TValue>> entry = ref _entries.StorageGetRef(i);
+                if (entry.Next >= -1) // Not in free list
                 {
-                    yield return element.Item.Value;
-                    element = element.NextElement;
+                    yield return entry.Item.Value;
                 }
             }
         }
@@ -229,10 +232,15 @@ public class LargeDictionary<TKey, TValue, TComparer> : ILargeDictionary<TKey, T
             throw new ArgumentNullException(nameof(item), "Key cannot be null");
         }
 
+        // Extend BEFORE adding if needed
+        Extend();
+
         long count = Count;
         long previousCount = count;
+        int freeList = _freeList;
+        int freeCount = _freeCount;
 
-        LargeSetHelpers.AddToStorage(ref item, _storage, _capacity, ref count, ref _comparer);
+        LargeSetHelpers.AddToStorage(ref item, _buckets, _entries, _bucketCount, ref count, ref freeList, ref freeCount, ref _comparer);
 
         if (count > previousCount && count > Constants.MaxLargeCollectionCount)
         {
@@ -240,7 +248,8 @@ public class LargeDictionary<TKey, TValue, TComparer> : ILargeDictionary<TKey, T
         }
 
         Count = count;
-        Extend();
+        _freeList = freeList;
+        _freeCount = freeCount;
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -338,8 +347,14 @@ public class LargeDictionary<TKey, TValue, TComparer> : ILargeDictionary<TKey, T
         KeyValuePair<TKey, TValue> keyItem = new(key, default);
 
         long count = Count;
-        bool result = LargeSetHelpers.RemoveFromStorage(ref keyItem, _storage, Capacity, ref count, ref _comparer, out KeyValuePair<TKey, TValue> removedItem);
+        int freeList = _freeList;
+        int freeCount = _freeCount;
+        
+        bool result = LargeSetHelpers.RemoveFromStorage(ref keyItem, _buckets, _entries, _bucketCount, ref count, ref freeList, ref freeCount, ref _comparer, out KeyValuePair<TKey, TValue> removedItem);
+        
         Count = count;
+        _freeList = freeList;
+        _freeCount = freeCount;
 
         if (result)
         {
@@ -382,8 +397,12 @@ public class LargeDictionary<TKey, TValue, TComparer> : ILargeDictionary<TKey, T
     public void Clear()
     {
         long count = Count;
-        LargeSetHelpers.ClearStorage(_storage, _capacity, ref count);
+        int freeList = _freeList;
+        int freeCount = _freeCount;
+        LargeSetHelpers.ClearStorage(_buckets, _entries, _bucketCount, ref count, ref freeList, ref freeCount);
         Count = count;
+        _freeList = freeList;
+        _freeCount = freeCount;
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -395,7 +414,7 @@ public class LargeDictionary<TKey, TValue, TComparer> : ILargeDictionary<TKey, T
         }
 
         KeyValuePair<TKey, TValue> keyItem = new(key, default);
-        if (!LargeSetHelpers.TryGetValueFromStorage(ref keyItem, _storage, Capacity, ref _comparer, out KeyValuePair<TKey, TValue> value))
+        if (!LargeSetHelpers.TryGetValueFromStorage(ref keyItem, _buckets, _entries, _bucketCount, ref _comparer, out KeyValuePair<TKey, TValue> value))
         {
             throw new KeyNotFoundException();
         }
@@ -412,7 +431,7 @@ public class LargeDictionary<TKey, TValue, TComparer> : ILargeDictionary<TKey, T
         }
 
         KeyValuePair<TKey, TValue> keyItem = new(key, default);
-        return LargeSetHelpers.ContainsInStorage(ref keyItem, _storage, Capacity, ref _comparer);
+        return LargeSetHelpers.ContainsInStorage(ref keyItem, _buckets, _entries, _bucketCount, ref _comparer);
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -434,7 +453,7 @@ public class LargeDictionary<TKey, TValue, TComparer> : ILargeDictionary<TKey, T
         }
 
         KeyValuePair<TKey, TValue> keyItem = new(key, default);
-        if (!LargeSetHelpers.TryGetValueFromStorage(ref keyItem, _storage, Capacity, ref _comparer, out KeyValuePair<TKey, TValue> keyAndValue))
+        if (!LargeSetHelpers.TryGetValueFromStorage(ref keyItem, _buckets, _entries, _bucketCount, ref _comparer, out KeyValuePair<TKey, TValue> keyAndValue))
         {
             value = default;
             return false;
@@ -452,10 +471,16 @@ public class LargeDictionary<TKey, TValue, TComparer> : ILargeDictionary<TKey, T
             throw new ArgumentNullException(nameof(key));
         }
 
+        // Extend BEFORE adding if needed
+        Extend();
+
         KeyValuePair<TKey, TValue> keyItem = new(key, default);
         KeyValuePair<TKey, TValue> valueItem = new(key, default);
         long count = Count;
-        bool found = LargeSetHelpers.TryGetOrAddToStorage(ref keyItem, ref valueItem, _storage, _capacity, ref count, ref _comparer, out KeyValuePair<TKey, TValue> kvp);
+        int freeList = _freeList;
+        int freeCount = _freeCount;
+        
+        bool found = LargeSetHelpers.TryGetOrAddToStorage(ref keyItem, ref valueItem, _buckets, _entries, _bucketCount, ref count, ref freeList, ref freeCount, ref _comparer, out KeyValuePair<TKey, TValue> kvp);
 
         if (!found && count > Constants.MaxLargeCollectionCount)
         {
@@ -463,12 +488,9 @@ public class LargeDictionary<TKey, TValue, TComparer> : ILargeDictionary<TKey, T
         }
 
         Count = count;
+        _freeList = freeList;
+        _freeCount = freeCount;
         value = kvp.Value;
-
-        if (!found)
-        {
-            Extend();
-        }
 
         return found;
     }
@@ -481,10 +503,16 @@ public class LargeDictionary<TKey, TValue, TComparer> : ILargeDictionary<TKey, T
             throw new ArgumentNullException(nameof(key));
         }
 
+        // Extend BEFORE adding if needed
+        Extend();
+
         KeyValuePair<TKey, TValue> searchItem = new(key, default);
         KeyValuePair<TKey, TValue> valueItem = new(key, valueIfNotFound);
         long count = Count;
-        bool found = LargeSetHelpers.TryGetOrAddToStorage(ref searchItem, ref valueItem, _storage, _capacity, ref count, ref _comparer, out KeyValuePair<TKey, TValue> kvp);
+        int freeList = _freeList;
+        int freeCount = _freeCount;
+        
+        bool found = LargeSetHelpers.TryGetOrAddToStorage(ref searchItem, ref valueItem, _buckets, _entries, _bucketCount, ref count, ref freeList, ref freeCount, ref _comparer, out KeyValuePair<TKey, TValue> kvp);
 
         if (!found && count > Constants.MaxLargeCollectionCount)
         {
@@ -492,12 +520,9 @@ public class LargeDictionary<TKey, TValue, TComparer> : ILargeDictionary<TKey, T
         }
 
         Count = count;
+        _freeList = freeList;
+        _freeCount = freeCount;
         value = kvp.Value;
-
-        if (!found)
-        {
-            Extend();
-        }
 
         return found;
     }
@@ -514,9 +539,15 @@ public class LargeDictionary<TKey, TValue, TComparer> : ILargeDictionary<TKey, T
             throw new ArgumentNullException(nameof(valueFactory));
         }
 
+        // Extend BEFORE adding if needed
+        Extend();
+
         KeyValuePair<TKey, TValue> searchItem = new(key, default);
         long count = Count;
-        bool found = LargeSetHelpers.TryGetOrAddToStorageWithFactory(ref searchItem, () => new KeyValuePair<TKey, TValue>(key, valueFactory.Invoke()), _storage, _capacity, ref count, ref _comparer, out KeyValuePair<TKey, TValue> kvp);
+        int freeList = _freeList;
+        int freeCount = _freeCount;
+        
+        bool found = LargeSetHelpers.TryGetOrAddToStorageWithFactory(ref searchItem, () => new KeyValuePair<TKey, TValue>(key, valueFactory.Invoke()), _buckets, _entries, _bucketCount, ref count, ref freeList, ref freeCount, ref _comparer, out KeyValuePair<TKey, TValue> kvp);
 
         if (!found && count > Constants.MaxLargeCollectionCount)
         {
@@ -524,12 +555,9 @@ public class LargeDictionary<TKey, TValue, TComparer> : ILargeDictionary<TKey, T
         }
 
         Count = count;
+        _freeList = freeList;
+        _freeCount = freeCount;
         value = kvp.Value;
-
-        if (!found)
-        {
-            Extend();
-        }
 
         return found;
     }
@@ -537,7 +565,7 @@ public class LargeDictionary<TKey, TValue, TComparer> : ILargeDictionary<TKey, T
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public IEnumerable<KeyValuePair<TKey, TValue>> GetAll()
     {
-        return LargeSetHelpers.GetAllFromStorage(_storage, _capacity);
+        return LargeSetHelpers.GetAllFromStorage(_entries, Count, _freeCount);
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -556,20 +584,40 @@ public class LargeDictionary<TKey, TValue, TComparer> : ILargeDictionary<TKey, T
     private void Extend()
     {
         long count = Count;
-        long capacity = _capacity;
-        LargeSetHelpers.ExtendStorage(ref _storage, ref capacity, ref count, CapacityGrowFactor, FixedCapacityGrowAmount, FixedCapacityGrowLimit, MaxLoadFactor, ref _comparer);
-        _capacity = capacity;
+        long bucketCount = _bucketCount;
+        int[][] buckets = _buckets;
+        HashEntry<KeyValuePair<TKey, TValue>>[][] entries = _entries;
+        int freeList = _freeList;
+        int freeCount = _freeCount;
+        
+        LargeSetHelpers.ExtendStorage(ref buckets, ref entries, ref bucketCount, ref count, ref freeList, ref freeCount, CapacityGrowFactor, FixedCapacityGrowAmount, FixedCapacityGrowLimit, MaxLoadFactor, ref _comparer);
+        
+        _buckets = buckets;
+        _entries = entries;
+        _bucketCount = bucketCount;
         Count = count;
+        _freeList = freeList;
+        _freeCount = freeCount;
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void Shrink()
     {
         long count = Count;
-        long capacity = _capacity;
-        LargeSetHelpers.ShrinkStorage(ref _storage, ref capacity, ref count, MinLoadFactor, MinLoadFactorTolerance, ref _comparer);
-        _capacity = capacity;
+        long bucketCount = _bucketCount;
+        int[][] buckets = _buckets;
+        HashEntry<KeyValuePair<TKey, TValue>>[][] entries = _entries;
+        int freeList = _freeList;
+        int freeCount = _freeCount;
+        
+        LargeSetHelpers.ShrinkStorage(ref buckets, ref entries, ref bucketCount, ref count, ref freeList, ref freeCount, MinLoadFactor, MinLoadFactorTolerance, ref _comparer);
+        
+        _buckets = buckets;
+        _entries = entries;
+        _bucketCount = bucketCount;
         Count = count;
+        _freeList = freeList;
+        _freeCount = freeCount;
     }
 
     #region DoForEach Methods
@@ -581,7 +629,7 @@ public class LargeDictionary<TKey, TValue, TComparer> : ILargeDictionary<TKey, T
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void DoForEach(Action<KeyValuePair<TKey, TValue>> action)
     {
-        LargeSetHelpers.DoForEachInStorage(_storage, _capacity, action);
+        LargeSetHelpers.DoForEachInStorage(_entries, Count, _freeCount, action);
     }
 
     /// <summary>
@@ -592,7 +640,7 @@ public class LargeDictionary<TKey, TValue, TComparer> : ILargeDictionary<TKey, T
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void DoForEach<TAction>(ref TAction action) where TAction : ILargeAction<KeyValuePair<TKey, TValue>>
     {
-        LargeSetHelpers.DoForEachInStorage(_storage, _capacity, ref action);
+        LargeSetHelpers.DoForEachInStorage(_entries, Count, _freeCount, ref action);
     }
 
     #endregion

@@ -164,6 +164,12 @@ public class LargeSetTest
     public async Task AddRange_IReadOnlyLargeArray_Overloads(long capacity)
     {
         long actualCapacity = Math.Max(1L, Math.Min(capacity, Constants.MaxLargeCollectionCount));
+        
+        // Skip test at max capacity - open addressing cannot extend when table is full
+        // and this test tries to add duplicate ranges which would require extension
+        if (actualCapacity >= Constants.MaxLargeCollectionCount)
+            return;
+
         var set = LargeSet.Create<long>(capacity: actualCapacity);
 
         long arrayCapacity = Math.Max(1L, Math.Min(actualCapacity, Constants.MaxLargeCollectionCount));

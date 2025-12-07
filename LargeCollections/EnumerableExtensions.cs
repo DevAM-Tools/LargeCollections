@@ -46,7 +46,6 @@ public static class EnumerableExtensions
         return largeSet;
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static IEnumerable<T> Skip<T>(this IEnumerable<T> items, long count)
     {
         if (count < 0L)
@@ -69,7 +68,6 @@ public static class EnumerableExtensions
         }
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static IEnumerable<T> Take<T>(this IEnumerable<T> items, long count)
     {
         if (count <= 0L)
@@ -93,7 +91,6 @@ public static class EnumerableExtensions
         }
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static IEnumerable<T> SkipTake<T>(this IEnumerable<T> items, long skipCount, long takeCount)
     {
         if (takeCount < 0L)
